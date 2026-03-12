@@ -129,8 +129,11 @@ async function main(): Promise<void> {
 
   // Initialize Payload
   let configFile: string
+  let tsconfigFile: string | undefined
   try {
-    configFile = findPayloadConfig(configPath)
+    const result = findPayloadConfig(configPath)
+    configFile = result.configPath
+    tsconfigFile = result.tsconfigPath
   } catch (error) {
     if (error instanceof ConfigNotFoundError) {
       console.error(error.message)
@@ -147,7 +150,7 @@ async function main(): Promise<void> {
 
   let payload: Awaited<ReturnType<typeof getPayloadInstance>> | undefined
   try {
-    payload = await getPayloadInstance(configFile)
+    payload = await getPayloadInstance(configFile, tsconfigFile)
   } catch (error) {
     console.log = originalConsoleLog
     console.error(`Error: Failed to initialize Payload.`)

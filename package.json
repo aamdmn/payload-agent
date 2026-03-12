@@ -31,6 +31,9 @@
     "format": "biome format --write ./src",
     "payload-agent": "tsx ./src/cli.ts"
   },
+  "dependencies": {
+    "tsx": "^4.19.2"
+  },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
     "@swc-node/register": "1.10.9",
@@ -38,7 +41,6 @@
     "@types/node": "22.19.9",
     "payload": "3.37.0",
     "rimraf": "3.0.2",
-    "tsx": "^4.19.2",
     "typescript": "5.7.3"
   },
   "peerDependencies": {

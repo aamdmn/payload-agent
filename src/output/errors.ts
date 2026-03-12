@@ -70,7 +70,7 @@ export function formatValidationError(
 
   if (error instanceof Error) {
     // Try to parse Payload validation errors
-    const errAny = error as Record<string, unknown>
+    const errAny = error as unknown as Record<string, unknown>
 
     if (errAny.data && typeof errAny.data === 'object') {
       const data = errAny.data as Record<string, unknown>

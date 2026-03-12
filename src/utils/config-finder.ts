@@ -8,11 +8,76 @@ const CONFIG_FILENAMES = [
   'src/app/payload.config.ts',
 ]
 
+const TSCONFIG_FILENAMES = ['tsconfig.json']
+
+export interface ConfigResult {
+  configPath: string
+  tsconfigPath?: string
+}
+
+/**
+ * Find the tsconfig.json nearest to the payload config.
+ * Walks up from the config file's directory.
+ */
+function findTsConfig(configPath: string): string | undefined {
+  let dir = path.dirname(path.resolve(configPath))
+  const root = path.parse(dir).root
+
+  while (dir !== root) {
+    for (const filename of TSCONFIG_FILENAMES) {
+      const candidate = path.join(dir, filename)
+      if (fs.existsSync(candidate)) {
+        return candidate
+      }
+    }
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return undefined
+}
+
+/**
+ * Parse a tsconfig.json file and extract paths and baseUrl.
+ * Handles the "extends" field for inherited configs.
+ */
+export function parseTsConfigPaths(tsconfigPath: string): {
+  paths: Record<string, string[]>
+  baseUrl: string
+} | null {
+  try {
+    const content = fs.readFileSync(tsconfigPath, 'utf-8')
+    // Strip comments (simple approach: remove // comments and /* */ blocks)
+    const stripped = content
+      .replace(/\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      // Remove trailing commas before } or ]
+      .replace(/,\s*([}\]])/g, '$1')
+    const config = JSON.parse(stripped)
+
+    const compilerOptions = config.compilerOptions || {}
+    const paths = compilerOptions.paths
+
+    if (!paths || Object.keys(paths).length === 0) {
+      return null
+    }
+
+    const tsconfigDir = path.dirname(tsconfigPath)
+    const baseUrl = compilerOptions.baseUrl
+      ? path.resolve(tsconfigDir, compilerOptions.baseUrl)
+      : tsconfigDir
+
+    return { paths, baseUrl }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Find the payload.config.ts file.
  * Priority: --config flag > PAYLOAD_CONFIG_PATH env var > auto-detect
  */
-export function findPayloadConfig(explicitPath?: string): string {
+export function findPayloadConfig(explicitPath?: string): ConfigResult {
   // 1. Explicit path from --config flag
   if (explicitPath) {
     const resolved = path.resolve(explicitPath)
@@ -22,7 +87,7 @@ export function findPayloadConfig(explicitPath?: string): string {
       )
     }
     loadEnvFromConfigDir(resolved)
-    return resolved
+    return { configPath: resolved, tsconfigPath: findTsConfig(resolved) }
   }
 
   // 2. PAYLOAD_CONFIG_PATH env var
@@ -35,7 +100,7 @@ export function findPayloadConfig(explicitPath?: string): string {
       )
     }
     loadEnvFromConfigDir(resolved)
-    return resolved
+    return { configPath: resolved, tsconfigPath: findTsConfig(resolved) }
   }
 
   // 3. Auto-detect in common locations
@@ -44,7 +109,7 @@ export function findPayloadConfig(explicitPath?: string): string {
     const candidate = path.resolve(cwd, filename)
     if (fs.existsSync(candidate)) {
       loadEnvFromConfigDir(candidate)
-      return candidate
+      return { configPath: candidate, tsconfigPath: findTsConfig(candidate) }
     }
   }
 

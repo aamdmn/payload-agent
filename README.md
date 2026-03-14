@@ -1,128 +1,118 @@
-# payload-agent
+<p align="center">
+  <img src=".github/banner.png" alt="payload-agent" />
+</p>
 
-PayloadCMS CLI for AI agents and humans. Simple, direct access to your CMS data.
+<p align="center">
+  <a href="https://www.npmjs.com/package/payload-agent"><img src="https://img.shields.io/npm/v/payload-agent" alt="npm" /></a>
+  <a href="https://github.com/aamdmn/payload-agent/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/payload-agent" alt="license" /></a>
+  <a href="https://www.npmjs.com/package/payload-agent"><img src="https://img.shields.io/npm/dm/payload-agent" alt="downloads" /></a>
+</p>
 
-No plugins. No MCP. No protocol overhead. Just commands.
+---
 
-## How It Works
+Direct database access to PayloadCMS through the Local API. No server, no API keys, no MCP. Just commands.
 
-`payload-agent` uses Payload's Local API to connect directly to your database. Point it at any Payload project's `payload.config.ts` and run commands.
+Built for AI coding agents (Claude Code, Cursor, etc.) but works great for humans too.
 
-```bash
-# From inside a Payload project directory
-payload-agent collections
-payload-agent describe posts
-payload-agent find posts --limit 5
-payload-agent create posts --data '{"title":"Hello World"}'
-```
-
-## Usage
-
-### Option 1: From a Payload project directory
-
-If your working directory contains a `payload.config.ts` (or `src/payload.config.ts`), payload-agent will find it automatically:
+## Quick Start
 
 ```bash
-cd /path/to/your-payload-project
-npx payload-agent collections
+cd your-payload-project
+npx payload-agent collections            # discover
+npx payload-agent describe posts         # understand schema
+npx payload-agent find posts --limit 5   # read
+npx payload-agent create posts --data '{"title":"Hello"}' # write
 ```
 
-### Option 2: Point at a config file
+Or point at a config directly:
 
 ```bash
-npx payload-agent collections --config /path/to/payload.config.ts
+npx payload-agent find posts --config ./src/payload.config.ts
 ```
 
-### Option 3: Environment variable
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `collections` | List all collections |
+| `globals` | List all globals |
+| `describe <name>` | Show full schema for a collection or global |
+| `status` | Instance status |
+| `find <collection>` | Query documents (`--where`, `--limit`, `--sort`, `--select`, `--depth`) |
+| `find-by-id <collection> <id>` | Get a single document |
+| `create <collection> --data '{...}'` | Create a document |
+| `update <collection> <id> --data '{...}'` | Partial update |
+| `update-many <collection> --where --data` | Bulk update |
+| `delete <collection> <id> --confirm` | Delete (previews first) |
+| `delete-many <collection> --where --confirm` | Bulk delete |
+| `upload <collection> <file\|dir>` | Upload file(s) to an upload collection |
+| `download <collection> <id\|--where>` | Download media to disk |
+| `get-global <slug>` | Read a global |
+| `update-global <slug> --data '{...}'` | Update a global |
+
+## Media
+
+Upload, download, and attach files to documents:
 
 ```bash
-export PAYLOAD_CONFIG_PATH=/path/to/payload.config.ts
-npx payload-agent collections
+# Upload
+payload-agent upload media ./hero.jpg --data '{"alt":"Hero image"}'
+payload-agent upload media ./photos/             # bulk upload directory
+
+# Download
+payload-agent download media 6789abc --out ./downloads/
+payload-agent download media --where '{"alt":{"contains":"hero"}}'
+
+# Auto-upload and attach to a document field
+payload-agent create pages --data '{"title":"About"}' --file 'heroImage=./hero.jpg'
+payload-agent update pages <id> --data '{}' --file 'thumbnail=./thumb.png'
 ```
 
-## Development
+The `--file` flag auto-detects the target upload collection from the field schema, uploads the file, and injects the resulting ID.
 
-### Testing against a real Payload project
-
-During development, use `pnpm payload-agent` from this repo and point at any Payload project:
-
-```bash
-# From this repo
-PAYLOAD_CONFIG_PATH=/path/to/your-payload-project/payload.config.ts pnpm payload-agent collections
-PAYLOAD_CONFIG_PATH=/path/to/your-payload-project/payload.config.ts pnpm payload-agent describe posts
-PAYLOAD_CONFIG_PATH=/path/to/your-payload-project/payload.config.ts pnpm payload-agent find posts --limit 5
-```
-
-Or set it once for the session:
-
-```bash
-export PAYLOAD_CONFIG_PATH=/path/to/your-payload-project/payload.config.ts
-pnpm payload-agent collections
-pnpm payload-agent describe posts
-pnpm payload-agent find posts --limit 5
-```
-
-### Commands
-
-Run `pnpm payload-agent --help` for the full command reference.
-
-**Introspection:**
-- `payload-agent collections` -- List all collections
-- `payload-agent describe <collection|global>` -- Show full schema
-- `payload-agent globals` -- List all globals
-- `payload-agent status` -- Instance status
-
-**Read:**
-- `payload-agent find <collection>` -- Query documents
-- `payload-agent find-by-id <collection> <id>` -- Get a document
-- `payload-agent get-global <slug>` -- Read a global
-
-**Write:**
-- `payload-agent create <collection> --data '{...}'` -- Create a document
-- `payload-agent update <collection> <id> --data '{...}'` -- Update a document
-- `payload-agent update-many <collection> --where '{...}' --data '{...}'` -- Bulk update
-- `payload-agent update-global <slug> --data '{...}'` -- Update a global
-
-**Delete (requires `--confirm`):**
-- `payload-agent delete <collection> <id>` -- Delete a document
-- `payload-agent delete-many <collection> --where '{...}'` -- Bulk delete
-
-### Global Flags
+## Flags
 
 | Flag | Description |
 |------|-------------|
 | `--json` | Machine-readable JSON output |
 | `--dry-run` | Validate without writing |
 | `--confirm` | Confirm destructive operations |
-| `--config <path>` | Path to payload.config.ts |
-| `--include-sensitive` | Show sensitive fields |
+| `--config <path>` | Path to `payload.config.ts` |
+| `--file 'field=./path'` | Upload and attach file to a field |
+| `--include-sensitive` | Include password hashes, API keys, etc. |
 
-## For AI Agents
+## How It Works
 
-Install the skill so your agent knows how to use payload-agent:
+```
+payload-agent find posts --limit 5
+       |
+       v
+  Import your payload.config.ts
+  Initialize Payload Local API
+  payload.find({ collection: 'posts', limit: 5 })
+  Output result
+```
+
+No HTTP server needed. Connects directly to your database through Payload's own Local API.
+
+## Agent Skill
+
+The `skills/` directory contains a [Claude Code skill](https://claude.ai/docs/skills) that teaches agents the discover-describe-read-write-verify workflow:
 
 ```bash
-# The skill teaches agents the workflow:
-# discover -> describe -> read -> write -> verify
+# Agents learn to:
+# 1. payload-agent collections        -> what exists?
+# 2. payload-agent describe posts     -> what fields?
+# 3. payload-agent find posts         -> what data?
+# 4. payload-agent create posts --data -> write
+# 5. payload-agent find-by-id posts   -> verify
 ```
 
-See `skills/payload-agent/SKILL.md` for the full agent instruction document.
+## Requirements
 
-## Architecture
+- Node.js ^18.20.2 or >=20.9.0
+- Payload CMS ^3.0.0
 
-```
-Agent types: payload-agent find posts --limit 5
-    |
-    v
-payload-agent CLI (Node.js)
-    |
-    1. Find payload.config.ts
-    2. Initialize Payload Local API (connects to your DB)
-    3. Execute: payload.find({ collection: 'posts', limit: 5 })
-    4. Output result
-    |
-    v
-Agent reads output, continues work
-```
+## License
 
-No HTTP server. No API keys. No MCP protocol. Direct database access through Payload's own Local API.
+MIT

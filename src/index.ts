@@ -10,10 +10,21 @@
 export type { OutputOptions } from './output/formatter.js'
 export { redact } from './output/redact.js'
 export { findPayloadConfig } from './utils/config-finder.js'
+export type { PayloadFile } from './utils/file-utils.js'
+export {
+  formatFileSize,
+  getMimeType,
+  readFileForUpload,
+  resolveFilePaths,
+} from './utils/file-utils.js'
 export { getPayloadInstance, shutdownPayload } from './utils/payload-init.js'
 export type { FieldInfo } from './utils/schema-introspection.js'
 export {
   extractFieldsInfo,
   getCollectionSlugs,
   getGlobalSlugs,
+  getUploadCollectionSlugs,
+  isUploadCollection,
+  resolveFieldPath,
+  resolveUploadCollection,
 } from './utils/schema-introspection.js'

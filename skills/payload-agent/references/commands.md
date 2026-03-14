@@ -158,6 +158,72 @@ payload-agent update-global site-settings --data '{"siteName":"New Name"}'
 
 ---
 
+## payload-agent upload <collection> <file|dir>
+
+Upload file(s) to an upload-enabled collection. Supports single files, multiple files, and directories.
+
+```bash
+payload-agent upload media ./hero.jpg
+payload-agent upload media ./hero.jpg --data '{"alt":"Hero image"}'
+payload-agent upload media ./photos/                    # All files in directory
+payload-agent upload media ./img1.jpg ./img2.png        # Multiple files
+payload-agent upload media ./hero.jpg --dry-run         # Preview only
+```
+
+### Flags
+| Flag | Type | Description |
+|------|------|-------------|
+| `--data` | JSON string | Metadata for the uploaded file (alt text, etc.) |
+| `--dry-run` | boolean | List files that would be uploaded without executing |
+
+The collection must be upload-enabled (has `upload` config). Run `payload-agent collections` to see which collections support uploads.
+
+For bulk uploads, a progress summary is shown. If any file fails, the rest still proceed.
+
+---
+
+## payload-agent download <collection> <id>
+
+Download file(s) from an upload-enabled collection to local disk.
+
+```bash
+payload-agent download media 507f1f77bcf86cd799439011
+payload-agent download media 507f1f77bcf86cd799439011 --out ./downloads/
+payload-agent download media --where '{"alt":{"contains":"hero"}}' --out ./images/
+payload-agent download media --where '{"mimeType":{"contains":"image"}}' --limit 50
+```
+
+### Flags
+| Flag | Type | Description |
+|------|------|-------------|
+| `--out` | path | Output directory (default: current directory) |
+| `--where` | JSON string | Query to select multiple files for download |
+| `--limit` | number | Max documents when using --where (default: 100) |
+| `--dry-run` | boolean | List files that would be downloaded without executing |
+
+Files are fetched via their URL. If the URL is relative, `serverURL` from the Payload config is prepended. Works with both local storage and cloud storage (S3, etc.).
+
+---
+
+## payload-agent create/update with --file
+
+The `create` and `update` commands support `--file` flags to automatically upload files and inject their IDs into document data.
+
+```bash
+# Upload hero.jpg to the media collection and set it as the heroImage field
+payload-agent create pages --data '{"title":"About"}' --file 'heroImage=./hero.jpg'
+
+# Multiple files for different fields
+payload-agent create pages --data '{"title":"About"}' --file 'heroImage=./hero.jpg' --file 'thumbnail=./thumb.png'
+
+# Works with nested/dot-path fields (arrays, blocks, groups)
+payload-agent update pages <id> --data '{}' --file 'layout.0.image=./photo.jpg'
+```
+
+The `--file` flag format is `fieldPath=./filePath`. The target upload collection is auto-detected from the field's schema (`relationTo`). The file is uploaded first, then the resulting document ID is injected into the data at the specified field path.
+
+---
+
 ## payload-agent status
 
 Show Payload instance status: connection, collections, globals, localization.

@@ -1,6 +1,6 @@
 ---
 name: payload-agent
-description: PayloadCMS CLI for AI agents. Use when the user needs to create, read, update, or delete CMS content, inspect collection schemas, or manage PayloadCMS data from the command line.
+description: PayloadCMS CLI for AI agents. Use when the user needs to create, read, update, or delete CMS content, upload/download media files, inspect collection schemas, or manage PayloadCMS data from the command line.
 allowed-tools: Bash(npx payload-agent:*), Bash(payload-agent:*), Bash(pnpm payload-agent:*)
 ---
 
@@ -71,14 +71,39 @@ payload-agent get-global <slug> [--depth N] [--select '...']
 # Create a document
 payload-agent create <collection> --data '{"field":"value"}' [--dry-run]
 
+# Create with file upload (auto-uploads file and injects ID)
+payload-agent create <collection> --data '{"title":"About"}' --file 'heroImage=./hero.jpg'
+
 # Update a single document
 payload-agent update <collection> <id> --data '{"field":"new value"}' [--dry-run]
+
+# Update with file upload
+payload-agent update <collection> <id> --data '{}' --file 'heroImage=./new-hero.jpg'
 
 # Update multiple documents
 payload-agent update-many <collection> --where '{"field":{"equals":"value"}}' --data '{"field":"new value"}' [--dry-run]
 
 # Update a global
 payload-agent update-global <slug> --data '{"field":"value"}' [--dry-run]
+```
+
+### Media (Upload / Download)
+
+```bash
+# Upload a file to an upload-enabled collection
+payload-agent upload <collection> <file|dir> [--data '{"alt":"..."}'] [--dry-run]
+
+# Upload multiple files
+payload-agent upload <collection> ./file1.jpg ./file2.png
+
+# Upload all files in a directory
+payload-agent upload <collection> ./photos/
+
+# Download a file by ID
+payload-agent download <collection> <id> [--out ./path/]
+
+# Download files matching a query
+payload-agent download <collection> --where '{"alt":{"contains":"hero"}}' [--out ./path/]
 ```
 
 ### Deleting Data (requires --confirm)
@@ -152,6 +177,19 @@ payload-agent update-many posts --where '{"status":{"equals":"draft"}}' --data '
 ```bash
 payload-agent delete-many posts --where '{"status":{"equals":"archived"}}'            # Preview what will be deleted
 payload-agent delete-many posts --where '{"status":{"equals":"archived"}}' --confirm  # Execute after verifying
+```
+
+### Upload media and attach to content
+```bash
+payload-agent describe pages                          # Find upload/relationship fields
+payload-agent upload media ./hero.jpg --data '{"alt":"Hero image"}'
+payload-agent create pages --data '{"title":"About"}' --file 'heroImage=./hero.jpg'   # Auto-upload + inject
+```
+
+### Bulk upload images
+```bash
+payload-agent upload media ./photos/                  # Upload all files in directory
+payload-agent upload media ./img1.jpg ./img2.png      # Upload specific files
 ```
 
 ## Error Handling

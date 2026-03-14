@@ -79,6 +79,55 @@ ID=$(payload-agent create posts --data '{"title":"Test"}' --json | jq -r '.id')
 payload-agent find-by-id posts "$ID"
 ```
 
+## Media Upload Pipeline
+
+```bash
+# 1. Check which collections support uploads
+payload-agent collections
+
+# 2. Understand the media schema (alt text, etc.)
+payload-agent describe media
+
+# 3. Upload a single file
+payload-agent upload media ./hero.jpg --data '{"alt":"Hero banner image"}'
+
+# 4. Bulk upload a directory
+payload-agent upload media ./photos/
+
+# 5. Verify uploads
+payload-agent find media --limit 5 --select '{"id":true,"filename":true,"alt":true}'
+```
+
+## Creating Content with Images
+
+```bash
+# Describe the target collection to find upload fields
+payload-agent describe pages
+
+# Create a page with an auto-uploaded hero image
+payload-agent create pages --data '{"title":"About Us","slug":"about"}' --file 'heroImage=./hero.jpg'
+
+# Create with multiple file fields
+payload-agent create pages --data '{"title":"Gallery"}' --file 'heroImage=./hero.jpg' --file 'thumbnail=./thumb.png'
+
+# Upload separately, then reference by ID
+payload-agent upload media ./hero.jpg --json   # Get the ID from output
+payload-agent create pages --data '{"title":"About","heroImage":"<media-id>"}'
+```
+
+## Download Media
+
+```bash
+# Download a specific file
+payload-agent download media <id> --out ./downloads/
+
+# Download all images matching a query
+payload-agent download media --where '{"mimeType":{"contains":"image"}}' --out ./backups/
+
+# Dry run to see what would be downloaded
+payload-agent download media --where '{"alt":{"contains":"hero"}}' --dry-run
+```
+
 ## Data Inspection
 
 ```bash

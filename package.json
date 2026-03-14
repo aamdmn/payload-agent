@@ -1,6 +1,6 @@
 {
   "name": "payload-agent",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "PayloadCMS CLI for AI agents and humans. Simple, direct access to your CMS data.",
   "license": "MIT",
   "type": "module",

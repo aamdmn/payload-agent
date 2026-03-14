@@ -3,16 +3,18 @@ import { collectionsCommand } from './commands/collections.js'
 import { createCommand } from './commands/create.js'
 import { deleteCommand, deleteManyCommand } from './commands/delete.js'
 import { describeCommand } from './commands/describe.js'
+import { downloadCommand } from './commands/download.js'
 import { findByIdCommand, findCommand } from './commands/find.js'
 import { getGlobalCommand, globalsCommand, updateGlobalCommand } from './commands/globals.js'
 import { statusCommand } from './commands/status.js'
 import { updateCommand, updateManyCommand } from './commands/update.js'
+import { uploadCommand } from './commands/upload.js'
 import type { OutputOptions } from './output/formatter.js'
 import { ConfigNotFoundError, findPayloadConfig } from './utils/config-finder.js'
 import { parseFlags } from './utils/parse-flags.js'
 import { getPayloadInstance, shutdownPayload } from './utils/payload-init.js'
 
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 
 const HELP = `payload-agent - PayloadCMS CLI for AI agents and humans
 
@@ -33,6 +35,11 @@ Write:
   update <collection> <id> --data     Update a document
   update-many <collection> --where    Bulk update documents
     --data '{...}'
+
+Media:
+  upload <collection> <file|dir>      Upload file(s) to an upload collection
+  download <collection> <id>          Download file(s) from an upload collection
+    [--out ./path/]
 
 Delete (requires --confirm):
   delete <collection> <id>            Delete a document
@@ -61,6 +68,10 @@ Examples:
   payload-agent update posts 6789abcdef --data '{"title":"Updated"}'
   payload-agent delete posts 6789abcdef --confirm
   payload-agent get-global site-settings
+  payload-agent upload media ./hero.jpg --data '{"alt":"Hero"}'
+  payload-agent upload media ./photos/
+  payload-agent download media 6789abcdef --out ./downloads/
+  payload-agent create pages --data '{"title":"About"}' --file 'heroImage=./hero.jpg'
 
 Workflow for agents:
   1. payload-agent collections          -> discover what's available
@@ -213,6 +224,14 @@ async function main(): Promise<void> {
         await updateGlobalCommand(payload, args, outputOpts)
         break
 
+      case 'upload':
+        await uploadCommand(payload, args, outputOpts)
+        break
+
+      case 'download':
+        await downloadCommand(payload, args, outputOpts)
+        break
+
       case 'status':
         await statusCommand(payload, args, outputOpts)
         break
@@ -230,6 +249,8 @@ async function main(): Promise<void> {
           'update-many',
           'delete',
           'delete-many',
+          'upload',
+          'download',
           'globals',
           'get-global',
           'update-global',

@@ -6,11 +6,117 @@ import {
 } from '../output/errors.js'
 import type { OutputOptions } from '../output/formatter.js'
 import { info, output } from '../output/formatter.js'
-import { parseFlags, positionalArgs } from '../utils/parse-flags.js'
-import { getCollectionSlugs, getFieldNames } from '../utils/schema-introspection.js'
+import { readFileForUpload } from '../utils/file-utils.js'
+import { parseFlags, parseFlagsMulti, positionalArgs } from '../utils/parse-flags.js'
+import {
+  getCollectionSlugs,
+  getFieldNames,
+  isUploadCollection,
+  resolveUploadCollection,
+} from '../utils/schema-introspection.js'
 
 /**
- * payload-agent update <collection> <id> --data '{...}' [--dry-run]
+ * Parse --file flag values into field path + file path pairs.
+ * Format: --file 'fieldPath=./filePath'
+ */
+function parseFileFlags(fileFlags: string[]): Array<{ fieldPath: string; filePath: string }> {
+  return fileFlags.map((flag) => {
+    const eqIndex = flag.indexOf('=')
+    if (eqIndex === -1) {
+      console.error(`Error: Invalid --file format '${flag}'. Expected 'fieldPath=./filePath'.`)
+      console.error("Example: --file 'heroImage=./hero.jpg'")
+      process.exit(1)
+    }
+    return {
+      fieldPath: flag.slice(0, eqIndex),
+      filePath: flag.slice(eqIndex + 1),
+    }
+  })
+}
+
+/**
+ * Set a value at a dot-path in an object, creating intermediate objects as needed.
+ */
+function setNestedValue(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
+  const segments = dotPath.split('.')
+  let current: Record<string, unknown> = obj
+
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segment = segments[i]
+    const nextSegment = segments[i + 1]
+    const isNextNumeric = /^\d+$/.test(nextSegment)
+
+    if (current[segment] === undefined || current[segment] === null) {
+      current[segment] = isNextNumeric ? [] : {}
+    }
+    current = current[segment] as Record<string, unknown>
+  }
+
+  current[segments[segments.length - 1]] = value
+}
+
+/**
+ * Upload files specified by --file flags, returning the updated data object
+ * with uploaded document IDs injected at the specified field paths.
+ */
+async function processFileFlags(
+  payload: Payload,
+  collectionSlug: string,
+  data: Record<string, unknown>,
+  fileFlags: Array<{ fieldPath: string; filePath: string }>,
+  dryRun?: boolean,
+): Promise<Record<string, unknown>> {
+  for (const { fieldPath, filePath } of fileFlags) {
+    const resolution = resolveUploadCollection(payload, collectionSlug, fieldPath)
+
+    if ('error' in resolution) {
+      console.error(`Error: ${resolution.error}`)
+      process.exit(1)
+    }
+
+    const uploadSlug = resolution.collection
+
+    if (dryRun) {
+      info(`  --file: would upload '${filePath}' to '${uploadSlug}' for field '${fieldPath}'`)
+      continue
+    }
+
+    let file: Awaited<ReturnType<typeof readFileForUpload>>
+    try {
+      file = await readFileForUpload(filePath)
+    } catch (error) {
+      console.error(
+        `Error reading file for '${fieldPath}': ${error instanceof Error ? error.message : String(error)}`,
+      )
+      process.exit(1)
+      return data
+    }
+
+    try {
+      const result = await payload.create({
+        collection: uploadSlug as Parameters<typeof payload.create>[0]['collection'],
+        data: {},
+        file,
+      })
+
+      const resultObj = result as Record<string, unknown>
+      console.log(
+        `Uploaded '${file.name}' to '${uploadSlug}' (id: ${resultObj.id}) for field '${fieldPath}'`,
+      )
+
+      setNestedValue(data, fieldPath, resultObj.id)
+    } catch (error) {
+      console.error(`Error uploading file for '${fieldPath}':`)
+      console.error(formatValidationError(error, uploadSlug))
+      process.exit(1)
+    }
+  }
+
+  return data
+}
+
+/**
+ * payload-agent update <collection> <id> --data '{...}' [--file 'field=./path'] [--dry-run]
  */
 export async function updateCommand(
   payload: Payload,
@@ -22,7 +128,9 @@ export async function updateCommand(
   const id = pos[1]
 
   if (!slug || !id) {
-    console.error("Usage: payload-agent update <collection> <id> --data '{...}' [--dry-run]")
+    console.error(
+      "Usage: payload-agent update <collection> <id> --data '{...}' [--file 'field=./path'] [--dry-run]",
+    )
     process.exit(1)
   }
 
@@ -33,21 +141,26 @@ export async function updateCommand(
   }
 
   const flags = parseFlags(args)
+  const multiFlags = parseFlagsMulti(args)
+  const fileFlags = multiFlags.file || []
 
-  if (!flags.data) {
-    console.error('Error: --data flag is required.')
+  // --data is required unless only --file flags are provided
+  if (!flags.data && fileFlags.length === 0) {
+    console.error('Error: --data flag is required (or use --file to attach files).')
     console.error(`Usage: payload-agent update ${slug} ${id} --data '{"title":"Updated Title"}'`)
     console.error(`Hint: Run 'payload-agent describe ${slug}' to see available fields.`)
     process.exit(1)
   }
 
-  let data: Record<string, unknown>
-  try {
-    data = JSON.parse(flags.data) as Record<string, unknown>
-  } catch {
-    console.error('Error: Invalid JSON in --data flag.')
-    process.exit(1)
-    return
+  let data: Record<string, unknown> = {}
+  if (flags.data) {
+    try {
+      data = JSON.parse(flags.data) as Record<string, unknown>
+    } catch {
+      console.error('Error: Invalid JSON in --data flag.')
+      process.exit(1)
+      return
+    }
   }
 
   // Check for unknown fields
@@ -63,6 +176,18 @@ export async function updateCommand(
         }
       }
     }
+  }
+
+  // Process --file flags: upload files and inject IDs into data
+  if (fileFlags.length > 0) {
+    const parsed = parseFileFlags(fileFlags)
+    data = await processFileFlags(payload, slug, data, parsed, opts.dryRun)
+  }
+
+  // For upload collections, also support replacing the file itself via --file
+  // without a field path (just a bare file path)
+  if (isUploadCollection(payload, slug) && fileFlags.length === 0) {
+    // No special handling needed -- standard update without file replacement
   }
 
   if (opts.dryRun) {

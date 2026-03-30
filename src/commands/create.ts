@@ -6,7 +6,9 @@ import {
 } from "../output/errors.js";
 import type { OutputOptions } from "../output/formatter.js";
 import { info, output } from "../output/formatter.js";
+import { parseDataFlag } from "../utils/data-parse.js";
 import { readFileForUpload } from "../utils/file-utils.js";
+import { validateLocale } from "../utils/locale.js";
 import {
   parseFlags,
   parseFlagsMulti,
@@ -44,7 +46,6 @@ function parseFileFlags(
 
 /**
  * Set a value at a dot-path in an object, creating intermediate objects as needed.
- * e.g. setNestedValue(obj, 'layout.0.image', '123') sets obj.layout[0].image = '123'
  */
 function setNestedValue(
   obj: Record<string, unknown>,
@@ -80,7 +81,6 @@ async function processFileFlags(
   dryRun?: boolean
 ): Promise<Record<string, unknown>> {
   for (const { fieldPath, filePath } of fileFlags) {
-    // Resolve which upload collection this field targets
     const resolution = resolveUploadCollection(
       payload,
       collectionSlug,
@@ -101,7 +101,6 @@ async function processFileFlags(
       continue;
     }
 
-    // Read and upload the file
     let file: Awaited<ReturnType<typeof readFileForUpload>>;
     try {
       file = await readFileForUpload(filePath);
@@ -128,7 +127,6 @@ async function processFileFlags(
         `Uploaded '${file.name}' to '${uploadSlug}' (id: ${resultObj.id}) for field '${fieldPath}'`
       );
 
-      // Inject the uploaded document's ID into the data at the field path
       setNestedValue(data, fieldPath, resultObj.id);
     } catch (error) {
       console.error(`Error uploading file for '${fieldPath}':`);
@@ -141,7 +139,7 @@ async function processFileFlags(
 }
 
 /**
- * payload-agent create <collection> --data '{...}' [--file 'field=./path'] [--dry-run]
+ * payload-agent create <collection> --data '{...}' [--locale <code>] [--file 'field=./path'] [--dry-run]
  */
 export async function createCommand(
   payload: Payload,
@@ -152,7 +150,7 @@ export async function createCommand(
   const slug = pos[0];
   if (!slug) {
     console.error(
-      "Usage: payload-agent create <collection> --data '{...}' [--file 'field=./path'] [--dry-run]"
+      "Usage: payload-agent create <collection> --data '{...}' [--locale <code>] [--file 'field=./path'] [--dry-run]"
     );
     process.exit(1);
   }
@@ -183,15 +181,12 @@ export async function createCommand(
 
   let data: Record<string, unknown> = {};
   if (flags.data) {
-    try {
-      data = JSON.parse(flags.data) as Record<string, unknown>;
-    } catch {
-      console.error("Error: Invalid JSON in --data flag.");
-      console.error(`Example: --data '{"title":"My Post","status":"draft"}'`);
-      process.exit(1);
-      return;
-    }
+    data = parseDataFlag(flags.data);
   }
+
+  const locale = flags.locale
+    ? validateLocale(payload, flags.locale)
+    : undefined;
 
   // Check for unknown field names and suggest corrections
   const knownFields = getFieldNames(payload, slug);
@@ -225,6 +220,7 @@ export async function createCommand(
     const result = await payload.create({
       collection: slug as Parameters<typeof payload.create>[0]["collection"],
       data: data as Record<string, unknown>,
+      ...(locale ? { locale } : {}),
       context: { disableRevalidate: true },
     });
 

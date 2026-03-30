@@ -78,7 +78,10 @@ The `--file` flag auto-detects the target upload collection from the field schem
 | `--dry-run` | Validate without writing |
 | `--confirm` | Confirm destructive operations |
 | `--config <path>` | Path to `payload.config.ts` |
+| `--locale <code>` | Locale for reading/writing localized fields (use `all` to see all locales) |
+| `--fallback-locale <code>` | Fallback locale for reads (use `none` to disable) |
 | `--file 'field=./path'` | Upload and attach file to a field |
+| `--data @file.json` | Read `--data` JSON from a file instead of inline |
 | `--include-sensitive` | Include password hashes, API keys, etc. |
 
 ## How It Works

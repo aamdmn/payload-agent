@@ -56,6 +56,8 @@ payload-agent find posts --depth 2                                    # Populate
 | `--sort` | string | Field to sort by. Prefix with `-` for descending |
 | `--select` | JSON string | Fields to include: `{"field":true}` |
 | `--depth` | number | Relationship population depth |
+| `--locale` | string | Locale code (e.g. `sk`, `cz`, `all`) |
+| `--fallback-locale` | string | Fallback locale for reads (use `none` to disable) |
 
 ---
 
@@ -66,6 +68,8 @@ Fetch a single document by its ID.
 ```bash
 payload-agent find-by-id posts 507f1f77bcf86cd799439011
 payload-agent find-by-id posts 507f1f77bcf86cd799439011 --depth 2
+payload-agent find-by-id posts 507f1f77bcf86cd799439011 --locale all   # See all locale values
+payload-agent find-by-id posts 507f1f77bcf86cd799439011 --locale fr --fallback-locale none  # See untranslated fields as null
 ```
 
 ---
@@ -224,9 +228,48 @@ The `--file` flag format is `fieldPath=./filePath`. The target upload collection
 
 ---
 
+## payload-agent copy-locale <collection>
+
+Copy all localized field values from one locale to another. Schema-aware -- only copies fields marked `localized: true`.
+
+```bash
+# Copy all products from sk to cz
+payload-agent copy-locale products --from sk --to cz
+
+# Copy a single document
+payload-agent copy-locale products <id> --from sk --to cz
+
+# Copy matching documents
+payload-agent copy-locale products --from sk --to cz --where '{"_status":{"equals":"published"}}'
+
+# Dry run: see what would be copied
+payload-agent copy-locale products --from sk --to cz --dry-run
+```
+
+### Flags
+| Flag | Type | Description |
+|------|------|-------------|
+| `--from` | string | Source locale (required) |
+| `--to` | string | Target locale (required) |
+| `--where` | JSON string | Filter which documents to copy |
+| `--dry-run` | boolean | Preview without writing |
+
+---
+
+## payload-agent copy-locale-global <slug>
+
+Copy localized field values between locales for a global.
+
+```bash
+payload-agent copy-locale-global header --from sk --to cz
+payload-agent copy-locale-global footer --from sk --to cz --dry-run
+```
+
+---
+
 ## payload-agent status
 
-Show Payload instance status: connection, collections, globals, localization.
+Show Payload instance status: connection, collections, globals, localization (with locale codes).
 
 ```bash
 payload-agent status

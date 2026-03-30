@@ -5,14 +5,16 @@ import {
 } from "../output/errors.js";
 import type { OutputOptions } from "../output/formatter.js";
 import { info, output } from "../output/formatter.js";
+import { buildLocaleArgs } from "../utils/locale.js";
 import { parseFlags, positionalArgs } from "../utils/parse-flags.js";
 import { getCollectionSlugs } from "../utils/schema-introspection.js";
 
 /**
- * payload-agent delete <collection> <id> [--confirm] [--dry-run]
+ * payload-agent delete <collection> <id> [--confirm] [--dry-run] [--locale <code>]
  *
  * Without --confirm: shows what would be deleted but does NOT delete.
  * With --confirm: executes the delete.
+ * --locale affects the preview read only (deletes always remove the full document).
  */
 export async function deleteCommand(
   payload: Payload,
@@ -34,11 +36,15 @@ export async function deleteCommand(
     process.exit(1);
   }
 
+  const flags = parseFlags(args);
+  const localeArgs = buildLocaleArgs(payload, flags);
+
   // Always preview first
   try {
     const doc = await payload.findByID({
       collection: slug as Parameters<typeof payload.findByID>[0]["collection"],
       id,
+      ...localeArgs,
     });
 
     if (!opts.confirm || opts.dryRun) {
@@ -71,10 +77,11 @@ export async function deleteCommand(
 }
 
 /**
- * payload-agent delete-many <collection> --where '{...}' [--confirm] [--dry-run]
+ * payload-agent delete-many <collection> --where '{...}' [--confirm] [--dry-run] [--locale <code>]
  *
  * Without --confirm: shows what would be deleted but does NOT delete.
  * With --confirm: executes the bulk delete.
+ * --locale affects the preview read only (deletes always remove the full document).
  */
 export async function deleteManyCommand(
   payload: Payload,
@@ -97,6 +104,7 @@ export async function deleteManyCommand(
   }
 
   const flags = parseFlags(args);
+  const localeArgs = buildLocaleArgs(payload, flags);
 
   if (!flags.where) {
     console.error("Error: --where flag is required for delete-many.");
@@ -119,6 +127,7 @@ export async function deleteManyCommand(
     collection: slug as Parameters<typeof payload.find>[0]["collection"],
     where,
     limit: 10,
+    ...localeArgs,
   });
 
   if (preview.totalDocs === 0) {

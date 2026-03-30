@@ -5,6 +5,8 @@ import {
 } from "../output/errors.js";
 import type { OutputOptions } from "../output/formatter.js";
 import { info, output, table } from "../output/formatter.js";
+import { parseDataFlag } from "../utils/data-parse.js";
+import { buildLocaleArgs, validateLocale } from "../utils/locale.js";
 import { parseFlags, positionalArgs } from "../utils/parse-flags.js";
 import {
   extractFieldsInfo,
@@ -49,7 +51,7 @@ export async function globalsCommand(
 }
 
 /**
- * payload-agent get-global <slug> [--select '...'] [--depth N]
+ * payload-agent get-global <slug> [--select '...'] [--depth N] [--locale <code>] [--fallback-locale <code>]
  */
 export async function getGlobalCommand(
   payload: Payload,
@@ -60,7 +62,7 @@ export async function getGlobalCommand(
   const slug = pos[0];
   if (!slug) {
     console.error(
-      "Usage: payload-agent get-global <slug> [--select '{...}'] [--depth N]"
+      "Usage: payload-agent get-global <slug> [--select '{...}'] [--depth N] [--locale <code>]"
     );
     process.exit(1);
   }
@@ -74,6 +76,7 @@ export async function getGlobalCommand(
   const flags = parseFlags(args);
   const findArgs: Record<string, unknown> = {
     slug,
+    ...buildLocaleArgs(payload, flags),
   };
 
   if (flags.depth) {
@@ -100,7 +103,7 @@ export async function getGlobalCommand(
 }
 
 /**
- * payload-agent update-global <slug> --data '{...}' [--dry-run]
+ * payload-agent update-global <slug> --data '{...}' [--locale <code>] [--dry-run]
  */
 export async function updateGlobalCommand(
   payload: Payload,
@@ -111,7 +114,7 @@ export async function updateGlobalCommand(
   const slug = pos[0];
   if (!slug) {
     console.error(
-      "Usage: payload-agent update-global <slug> --data '{...}' [--dry-run]"
+      "Usage: payload-agent update-global <slug> --data '{...}' [--locale <code>] [--dry-run]"
     );
     process.exit(1);
   }
@@ -132,17 +135,16 @@ export async function updateGlobalCommand(
     process.exit(1);
   }
 
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(flags.data) as Record<string, unknown>;
-  } catch {
-    console.error("Error: Invalid JSON in --data flag.");
-    process.exit(1);
-    return;
-  }
+  const data = parseDataFlag(flags.data);
+  const locale = flags.locale
+    ? validateLocale(payload, flags.locale)
+    : undefined;
 
   if (opts.dryRun) {
-    info(`Dry run: would update global '${slug}' with data:`);
+    const target = locale
+      ? `global '${slug}' (locale: ${locale})`
+      : `global '${slug}'`;
+    info(`Dry run: would update ${target} with data:`);
     output(data, opts);
     return;
   }
@@ -151,13 +153,17 @@ export async function updateGlobalCommand(
     const result = await payload.updateGlobal({
       slug: slug as Parameters<typeof payload.updateGlobal>[0]["slug"],
       data: data as Record<string, unknown>,
+      ...(locale ? { locale } : {}),
       context: { disableRevalidate: true },
     });
 
     if (opts.json) {
       output(result, opts);
     } else {
-      console.log(`Updated global '${slug}'.`);
+      const msg = locale
+        ? `Updated global '${slug}' (locale: ${locale}).`
+        : `Updated global '${slug}'.`;
+      console.log(msg);
       output(result, opts);
     }
   } catch (error) {

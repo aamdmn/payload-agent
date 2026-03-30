@@ -6,7 +6,9 @@ import {
 } from "../output/errors.js";
 import type { OutputOptions } from "../output/formatter.js";
 import { info, output } from "../output/formatter.js";
+import { parseDataFlag } from "../utils/data-parse.js";
 import { readFileForUpload } from "../utils/file-utils.js";
+import { buildLocaleArgs, validateLocale } from "../utils/locale.js";
 import {
   parseFlags,
   parseFlagsMulti,
@@ -137,7 +139,7 @@ async function processFileFlags(
 }
 
 /**
- * payload-agent update <collection> <id> --data '{...}' [--file 'field=./path'] [--dry-run]
+ * payload-agent update <collection> <id> --data '{...}' [--locale <code>] [--file 'field=./path'] [--dry-run]
  */
 export async function updateCommand(
   payload: Payload,
@@ -150,7 +152,7 @@ export async function updateCommand(
 
   if (!(slug && id)) {
     console.error(
-      "Usage: payload-agent update <collection> <id> --data '{...}' [--file 'field=./path'] [--dry-run]"
+      "Usage: payload-agent update <collection> <id> --data '{...}' [--locale <code>] [--file 'field=./path'] [--dry-run]"
     );
     process.exit(1);
   }
@@ -181,14 +183,12 @@ export async function updateCommand(
 
   let data: Record<string, unknown> = {};
   if (flags.data) {
-    try {
-      data = JSON.parse(flags.data) as Record<string, unknown>;
-    } catch {
-      console.error("Error: Invalid JSON in --data flag.");
-      process.exit(1);
-      return;
-    }
+    data = parseDataFlag(flags.data);
   }
+
+  const locale = flags.locale
+    ? validateLocale(payload, flags.locale)
+    : undefined;
 
   // Check for unknown fields
   const knownFields = getFieldNames(payload, slug);
@@ -218,7 +218,10 @@ export async function updateCommand(
   }
 
   if (opts.dryRun) {
-    info(`Dry run: would update document '${id}' in '${slug}' with data:`);
+    const target = locale
+      ? `document '${id}' in '${slug}' (locale: ${locale})`
+      : `document '${id}' in '${slug}'`;
+    info(`Dry run: would update ${target} with data:`);
     output(data, opts);
     return;
   }
@@ -228,13 +231,17 @@ export async function updateCommand(
       collection: slug as Parameters<typeof payload.update>[0]["collection"],
       id,
       data: data as Record<string, unknown>,
+      ...(locale ? { locale } : {}),
       context: { disableRevalidate: true },
     });
 
     if (opts.json) {
       output(result, opts);
     } else {
-      console.log(`Updated document '${id}' in '${slug}'.`);
+      const msg = locale
+        ? `Updated document '${id}' in '${slug}' (locale: ${locale}).`
+        : `Updated document '${id}' in '${slug}'.`;
+      console.log(msg);
       output(result, opts);
     }
   } catch (error) {
@@ -244,7 +251,7 @@ export async function updateCommand(
 }
 
 /**
- * payload-agent update-many <collection> --where '{...}' --data '{...}' [--dry-run]
+ * payload-agent update-many <collection> --where '{...}' --data '{...}' [--locale <code>] [--dry-run]
  */
 export async function updateManyCommand(
   payload: Payload,
@@ -255,7 +262,7 @@ export async function updateManyCommand(
   const slug = pos[0];
   if (!slug) {
     console.error(
-      "Usage: payload-agent update-many <collection> --where '{...}' --data '{...}' [--dry-run]"
+      "Usage: payload-agent update-many <collection> --where '{...}' --data '{...}' [--locale <code>] [--dry-run]"
     );
     process.exit(1);
   }
@@ -288,14 +295,10 @@ export async function updateManyCommand(
     return;
   }
 
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(flags.data) as Record<string, unknown>;
-  } catch {
-    console.error("Error: Invalid JSON in --data flag.");
-    process.exit(1);
-    return;
-  }
+  const data = parseDataFlag(flags.data);
+  const locale = flags.locale
+    ? validateLocale(payload, flags.locale)
+    : undefined;
 
   if (opts.dryRun) {
     // Preview: find matching docs first
@@ -303,9 +306,11 @@ export async function updateManyCommand(
       collection: slug as Parameters<typeof payload.find>[0]["collection"],
       where,
       limit: 10,
+      ...buildLocaleArgs(payload, flags),
     });
+    const target = locale ? `(locale: ${locale})` : "";
     info(
-      `Dry run: would update ${preview.totalDocs} document(s) in '${slug}' with data:`
+      `Dry run: would update ${preview.totalDocs} document(s) in '${slug}' ${target} with data:`
     );
     output(data, opts);
     if (preview.totalDocs > 0) {
@@ -320,6 +325,7 @@ export async function updateManyCommand(
       collection: slug as Parameters<typeof payload.update>[0]["collection"],
       where,
       data: data as Record<string, unknown>,
+      ...(locale ? { locale } : {}),
       context: { disableRevalidate: true },
     });
 
@@ -329,7 +335,10 @@ export async function updateManyCommand(
     if (opts.json) {
       output(result, opts);
     } else {
-      console.log(`Updated ${docs.length} document(s) in '${slug}'.`);
+      const msg = locale
+        ? `Updated ${docs.length} document(s) in '${slug}' (locale: ${locale}).`
+        : `Updated ${docs.length} document(s) in '${slug}'.`;
+      console.log(msg);
     }
   } catch (error) {
     console.error(formatValidationError(error, slug));

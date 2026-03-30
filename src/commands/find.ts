@@ -1,143 +1,167 @@
-import type { Payload, Where } from 'payload'
-import { formatCollectionNotFoundError, formatValidationError } from '../output/errors.js'
-import type { OutputOptions } from '../output/formatter.js'
-import { output, paginationInfo } from '../output/formatter.js'
-import { parseFlags, positionalArgs } from '../utils/parse-flags.js'
-import { getCollectionSlugs } from '../utils/schema-introspection.js'
+import type { Payload, Where } from "payload";
+import {
+  formatCollectionNotFoundError,
+  formatValidationError,
+} from "../output/errors.js";
+import type { OutputOptions } from "../output/formatter.js";
+import { output, paginationInfo } from "../output/formatter.js";
+import { buildLocaleArgs } from "../utils/locale.js";
+import { parseFlags, positionalArgs } from "../utils/parse-flags.js";
+import { getCollectionSlugs } from "../utils/schema-introspection.js";
 
 /**
- * payload-agent find <collection> [--where '...'] [--limit N] [--page N] [--sort field] [--select '...'] [--depth N]
+ * payload-agent find <collection> [--where '...'] [--limit N] [--page N] [--sort field] [--select '...'] [--depth N] [--locale <code>] [--fallback-locale <code>]
  */
 export async function findCommand(
   payload: Payload,
   args: string[],
-  opts: Partial<OutputOptions>,
+  opts: Partial<OutputOptions>
 ): Promise<void> {
-  const pos = positionalArgs(args)
-  const slug = pos[0]
+  const pos = positionalArgs(args);
+  const slug = pos[0];
   if (!slug) {
     console.error(
-      "Usage: payload-agent find <collection> [--where '{...}'] [--limit N] [--page N] [--sort field] [--select '{...}'] [--depth N]",
-    )
-    process.exit(1)
+      "Usage: payload-agent find <collection> [--where '{...}'] [--limit N] [--page N] [--sort field] [--select '{...}'] [--depth N] [--locale <code>]"
+    );
+    process.exit(1);
   }
 
   // Validate collection
-  const collections = getCollectionSlugs(payload)
+  const collections = getCollectionSlugs(payload);
   if (!collections.includes(slug)) {
-    console.error(formatCollectionNotFoundError(slug, collections))
-    process.exit(1)
+    console.error(formatCollectionNotFoundError(slug, collections));
+    process.exit(1);
   }
 
-  const flags = parseFlags(args)
+  const flags = parseFlags(args);
 
   // Parse optional parameters
   const findArgs: Record<string, unknown> = {
     collection: slug,
-  }
+    ...buildLocaleArgs(payload, flags),
+  };
 
   if (flags.where) {
     try {
-      findArgs.where = JSON.parse(flags.where) as Where
+      findArgs.where = JSON.parse(flags.where) as Where;
     } catch {
-      console.error('Error: Invalid JSON in --where flag.')
-      console.error('Example: --where \'{"status":{"equals":"published"}}\'')
-      process.exit(1)
+      console.error("Error: Invalid JSON in --where flag.");
+      console.error('Example: --where \'{"status":{"equals":"published"}}\'');
+      process.exit(1);
     }
   }
 
-  if (flags.limit) findArgs.limit = parseInt(flags.limit, 10)
-  if (flags.page) findArgs.page = parseInt(flags.page, 10)
-  if (flags.sort) findArgs.sort = flags.sort
-  if (flags.depth) findArgs.depth = parseInt(flags.depth, 10)
+  if (flags.limit) {
+    findArgs.limit = Number.parseInt(flags.limit, 10);
+  }
+  if (flags.page) {
+    findArgs.page = Number.parseInt(flags.page, 10);
+  }
+  if (flags.sort) {
+    findArgs.sort = flags.sort;
+  }
+  if (flags.depth) {
+    findArgs.depth = Number.parseInt(flags.depth, 10);
+  }
 
   if (flags.select) {
     try {
-      findArgs.select = JSON.parse(flags.select)
+      findArgs.select = JSON.parse(flags.select);
     } catch {
-      console.error('Error: Invalid JSON in --select flag.')
-      console.error('Example: --select \'{"title":true,"slug":true}\'')
-      process.exit(1)
+      console.error("Error: Invalid JSON in --select flag.");
+      console.error('Example: --select \'{"title":true,"slug":true}\'');
+      process.exit(1);
     }
   }
 
   try {
-    const result = await payload.find(findArgs as Parameters<typeof payload.find>[0])
+    const result = await payload.find(
+      findArgs as Parameters<typeof payload.find>[0]
+    );
 
     if (opts.json) {
-      output(result, opts)
-      return
+      output(result, opts);
+      return;
     }
 
     // Human-readable
     if (result.docs.length === 0) {
-      console.log(`No documents found in '${slug}'.`)
-      return
+      console.log(`No documents found in '${slug}'.`);
+      return;
     }
 
-    output(result.docs, opts)
-    console.error(`\n${paginationInfo(result)}`)
+    output(result.docs, opts);
+    console.error(`\n${paginationInfo(result)}`);
   } catch (error) {
-    console.error(formatValidationError(error, slug))
-    process.exit(1)
+    console.error(formatValidationError(error, slug));
+    process.exit(1);
   }
 }
 
 /**
- * payload-agent find-by-id <collection> <id> [--select '...'] [--depth N]
+ * payload-agent find-by-id <collection> <id> [--select '...'] [--depth N] [--locale <code>] [--fallback-locale <code>]
  */
 export async function findByIdCommand(
   payload: Payload,
   args: string[],
-  opts: Partial<OutputOptions>,
+  opts: Partial<OutputOptions>
 ): Promise<void> {
-  const pos = positionalArgs(args)
-  const slug = pos[0]
-  const id = pos[1]
+  const pos = positionalArgs(args);
+  const slug = pos[0];
+  const id = pos[1];
 
-  if (!slug || !id) {
+  if (!(slug && id)) {
     console.error(
-      "Usage: payload-agent find-by-id <collection> <id> [--select '{...}'] [--depth N]",
-    )
-    process.exit(1)
+      "Usage: payload-agent find-by-id <collection> <id> [--select '{...}'] [--depth N] [--locale <code>]"
+    );
+    process.exit(1);
   }
 
   // Validate collection
-  const collections = getCollectionSlugs(payload)
+  const collections = getCollectionSlugs(payload);
   if (!collections.includes(slug)) {
-    console.error(formatCollectionNotFoundError(slug, collections))
-    process.exit(1)
+    console.error(formatCollectionNotFoundError(slug, collections));
+    process.exit(1);
   }
 
-  const flags = parseFlags(args)
+  const flags = parseFlags(args);
 
   const findArgs: Record<string, unknown> = {
     collection: slug,
     id,
-  }
+    ...buildLocaleArgs(payload, flags),
+  };
 
-  if (flags.depth) findArgs.depth = parseInt(flags.depth, 10)
+  if (flags.depth) {
+    findArgs.depth = Number.parseInt(flags.depth, 10);
+  }
 
   if (flags.select) {
     try {
-      findArgs.select = JSON.parse(flags.select)
+      findArgs.select = JSON.parse(flags.select);
     } catch {
-      console.error('Error: Invalid JSON in --select flag.')
-      process.exit(1)
+      console.error("Error: Invalid JSON in --select flag.");
+      process.exit(1);
     }
   }
 
   try {
-    const result = await payload.findByID(findArgs as Parameters<typeof payload.findByID>[0])
-    output(result, opts)
+    const result = await payload.findByID(
+      findArgs as Parameters<typeof payload.findByID>[0]
+    );
+    output(result, opts);
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error)
-    if (errMsg.includes('not found') || errMsg.includes('Not Found')) {
-      console.error(`Error: Document '${id}' not found in collection '${slug}'.`)
-      console.error(`Hint: Run 'payload-agent find ${slug} --limit 5' to see existing documents.`)
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (errMsg.includes("not found") || errMsg.includes("Not Found")) {
+      console.error(
+        `Error: Document '${id}' not found in collection '${slug}'.`
+      );
+      console.error(
+        `Hint: Run 'payload-agent find ${slug} --limit 5' to see existing documents.`
+      );
     } else {
-      console.error(formatValidationError(error, slug))
+      console.error(formatValidationError(error, slug));
     }
-    process.exit(1)
+    process.exit(1);
   }
 }

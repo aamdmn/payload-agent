@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module'
+
 // Commands
 import { collectionsCommand } from './commands/collections.js'
 import { copyLocaleCommand, copyLocaleGlobalCommand } from './commands/copy-locale.js'
@@ -15,7 +17,8 @@ import { ConfigNotFoundError, findPayloadConfig } from './utils/config-finder.js
 import { parseFlags } from './utils/parse-flags.js'
 import { getPayloadInstance, shutdownPayload } from './utils/payload-init.js'
 
-const VERSION = '0.3.1'
+const require = createRequire(import.meta.url)
+const { version: VERSION } = require('../package.json') as { version: string }
 
 const HELP = `payload-agent - PayloadCMS CLI for AI agents and humans
 

@@ -18,6 +18,7 @@
   "types": "./src/index.ts",
   "files": [
     "dist",
+    "!dist/**/*.js.map",
     "bin",
     "skills"
   ],
@@ -29,7 +30,8 @@
     "check": "biome check ./src",
     "check:fix": "biome check --write ./src",
     "format": "biome format --write ./src",
-    "payload-agent": "tsx ./src/cli.ts"
+    "payload-agent": "tsx ./src/cli.ts",
+    "prepublishOnly": "pnpm check && pnpm build"
   },
   "dependencies": {
     "tsx": "^4.19.2"
@@ -63,6 +65,12 @@
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aamdmn/payload-agent.git"
+  },
+  "homepage": "https://github.com/aamdmn/payload-agent",
+  "bugs": "https://github.com/aamdmn/payload-agent/issues",
   "keywords": [
     "payloadcms",
     "payload",

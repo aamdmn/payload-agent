@@ -1,8 +1,8 @@
-import type { Payload } from "payload";
+import type { Payload } from 'payload'
 
 export interface LocaleConfig {
-  defaultLocale: string;
-  locales: string[];
+  defaultLocale: string
+  locales: string[]
 }
 
 /**
@@ -10,30 +10,26 @@ export interface LocaleConfig {
  * Returns the locale codes and default locale, or null if localization is disabled.
  */
 export function getLocaleConfig(payload: Payload): LocaleConfig | null {
-  const loc = payload.config.localization;
+  const loc = payload.config.localization
   if (!loc) {
-    return null;
+    return null
   }
 
   const locales = loc.locales.map((l: string | { code: string }) =>
-    typeof l === "string" ? l : l.code
-  );
+    typeof l === 'string' ? l : l.code,
+  )
 
   const defaultLocale =
-    typeof loc.defaultLocale === "string"
-      ? loc.defaultLocale
-      : locales[0] || "en";
+    typeof loc.defaultLocale === 'string' ? loc.defaultLocale : locales[0] || 'en'
 
-  return { locales, defaultLocale };
+  return { locales, defaultLocale }
 }
 
 /**
  * Format available locales for display. E.g. "sk (default), cz"
  */
 export function formatLocales(config: LocaleConfig): string {
-  return config.locales
-    .map((l) => (l === config.defaultLocale ? `${l} (default)` : l))
-    .join(", ");
+  return config.locales.map((l) => (l === config.defaultLocale ? `${l} (default)` : l)).join(', ')
 }
 
 /**
@@ -42,26 +38,26 @@ export function formatLocales(config: LocaleConfig): string {
  * Prints error + exits if invalid or localization is not configured.
  */
 export function validateLocale(payload: Payload, value: string): string {
-  const config = getLocaleConfig(payload);
+  const config = getLocaleConfig(payload)
 
   if (!config) {
     console.error(
-      "Error: --locale was specified but this Payload instance has no localization configured."
-    );
-    process.exit(1);
+      'Error: --locale was specified but this Payload instance has no localization configured.',
+    )
+    process.exit(1)
   }
 
-  if (value === "all") {
-    return "all";
+  if (value === 'all') {
+    return 'all'
   }
 
   if (!config.locales.includes(value)) {
-    console.error(`Error: Invalid locale "${value}".`);
-    console.error(`Available locales: ${formatLocales(config)}`);
-    process.exit(1);
+    console.error(`Error: Invalid locale "${value}".`)
+    console.error(`Available locales: ${formatLocales(config)}`)
+    process.exit(1)
   }
 
-  return value;
+  return value
 }
 
 /**
@@ -70,33 +66,28 @@ export function validateLocale(payload: Payload, value: string): string {
  * A valid locale string → that string.
  * Validates against config.
  */
-export function parseFallbackLocale(
-  payload: Payload,
-  value: string
-): string | false {
-  if (value === "none" || value === "false") {
-    return false;
+export function parseFallbackLocale(payload: Payload, value: string): string | false {
+  if (value === 'none' || value === 'false') {
+    return false
   }
 
-  const config = getLocaleConfig(payload);
+  const config = getLocaleConfig(payload)
 
   if (!config) {
     console.error(
-      "Error: --fallback-locale was specified but this Payload instance has no localization configured."
-    );
-    process.exit(1);
+      'Error: --fallback-locale was specified but this Payload instance has no localization configured.',
+    )
+    process.exit(1)
   }
 
   if (!config.locales.includes(value)) {
-    console.error(`Error: Invalid fallback locale "${value}".`);
-    console.error(`Available locales: ${formatLocales(config)}`);
-    console.error(
-      'Use "none" to disable fallback (untranslated fields return null).'
-    );
-    process.exit(1);
+    console.error(`Error: Invalid fallback locale "${value}".`)
+    console.error(`Available locales: ${formatLocales(config)}`)
+    console.error('Use "none" to disable fallback (untranslated fields return null).')
+    process.exit(1)
   }
 
-  return value;
+  return value
 }
 
 /**
@@ -105,16 +96,16 @@ export function parseFallbackLocale(
  */
 export function buildLocaleArgs(
   payload: Payload,
-  flags: Record<string, string | undefined>
+  flags: Record<string, string | undefined>,
 ): Record<string, unknown> {
-  const args: Record<string, unknown> = {};
+  const args: Record<string, unknown> = {}
 
   if (flags.locale) {
-    args.locale = validateLocale(payload, flags.locale);
+    args.locale = validateLocale(payload, flags.locale)
   }
   if (flags.fallbackLocale) {
-    args.fallbackLocale = parseFallbackLocale(payload, flags.fallbackLocale);
+    args.fallbackLocale = parseFallbackLocale(payload, flags.fallbackLocale)
   }
 
-  return args;
+  return args
 }

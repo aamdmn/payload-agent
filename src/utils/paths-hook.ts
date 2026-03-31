@@ -9,7 +9,7 @@
  */
 
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 
 interface PathMapping {
   prefix: string

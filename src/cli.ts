@@ -27,6 +27,7 @@ Usage: payload-agent <command> [arguments] [flags]
 Introspection:
   collections                         List all collections
   describe <collection|global>        Show full schema for a collection or global
+    [--examples]                        Include example values for json fields
   globals                             List all globals
   status                              Show Payload instance status
 

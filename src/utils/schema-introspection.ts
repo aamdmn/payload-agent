@@ -3,21 +3,21 @@ import type { CollectionConfig, Field, GlobalConfig, Payload } from 'payload'
 import { formatCollectionNotFoundError, formatGlobalNotFoundError } from '../output/errors.js'
 
 export interface FieldInfo {
-  name: string
-  type: string
-  required: boolean
-  localized: boolean
+  description?: string
+  fields?: FieldInfo[]
   hasDefault: boolean
   label?: string
-  description?: string
-  relationTo?: string | string[]
-  options?: Array<{ label: string; value: string }> | string[]
-  fields?: FieldInfo[]
-  maxDepth?: number
-  min?: number
+  localized: boolean
   max?: number
-  minRows?: number
+  maxDepth?: number
   maxRows?: number
+  min?: number
+  minRows?: number
+  name: string
+  options?: Array<{ label: string; value: string }> | string[]
+  relationTo?: string | string[]
+  required: boolean
+  type: string
 }
 
 /**
@@ -26,7 +26,9 @@ export interface FieldInfo {
  */
 export function extractFieldInfo(field: Field): FieldInfo | null {
   // Skip UI-only fields
-  if (field.type === 'ui') return null
+  if (field.type === 'ui') {
+    return null
+  }
 
   // Handle presentational fields that contain sub-fields
   if (field.type === 'row' || field.type === 'collapsible') {
@@ -78,16 +80,24 @@ export function extractFieldInfo(field: Field): FieldInfo | null {
       break
 
     case 'number':
-      if ('min' in field) info.min = field.min as number
-      if ('max' in field) info.max = field.max as number
+      if ('min' in field) {
+        info.min = field.min as number
+      }
+      if ('max' in field) {
+        info.max = field.max as number
+      }
       break
 
     case 'array':
       if ('fields' in field && field.fields) {
         info.fields = extractFieldsInfo(field.fields as Field[])
       }
-      if ('minRows' in field) info.minRows = field.minRows as number
-      if ('maxRows' in field) info.maxRows = field.maxRows as number
+      if ('minRows' in field) {
+        info.minRows = field.minRows as number
+      }
+      if ('maxRows' in field) {
+        info.maxRows = field.maxRows as number
+      }
       break
 
     case 'blocks':
@@ -155,7 +165,9 @@ export function getFieldNames(payload: Payload, collectionSlug: string): string[
   const collection = payload.config.collections.find(
     (c: CollectionConfig) => c.slug === collectionSlug,
   )
-  if (!collection) return []
+  if (!collection) {
+    return []
+  }
   return extractFieldsInfo(collection.fields as Field[]).map((f) => f.name)
 }
 
@@ -200,7 +212,9 @@ export function validateGlobal(payload: Payload, slug: string): string {
  */
 export function isUploadCollection(payload: Payload, slug: string): boolean {
   const collection = payload.config.collections.find((c: CollectionConfig) => c.slug === slug)
-  if (!collection) return false
+  if (!collection) {
+    return false
+  }
   return Boolean(collection.upload)
 }
 
@@ -233,7 +247,9 @@ export function resolveFieldPath(
   const collection = payload.config.collections.find(
     (c: CollectionConfig) => c.slug === collectionSlug,
   )
-  if (!collection) return null
+  if (!collection) {
+    return null
+  }
 
   const segments = fieldPath.split('.')
   let fields = extractFieldsInfo(collection.fields as Field[])
@@ -242,10 +258,14 @@ export function resolveFieldPath(
     const segment = segments[i]
 
     // Skip numeric segments (array indices)
-    if (/^\d+$/.test(segment)) continue
+    if (/^\d+$/.test(segment)) {
+      continue
+    }
 
     const field = fields.find((f) => f.name === segment)
-    if (!field) return null
+    if (!field) {
+      return null
+    }
 
     // If this is the last meaningful segment, return it
     const remainingSegments = segments.slice(i + 1).filter((s) => !/^\d+$/.test(s))
@@ -295,7 +315,9 @@ export function resolveUploadCollection(
   const field = resolveFieldPath(payload, collectionSlug, fieldPath)
 
   if (!field) {
-    return { error: `Field '${fieldPath}' not found in collection '${collectionSlug}'.` }
+    return {
+      error: `Field '${fieldPath}' not found in collection '${collectionSlug}'.`,
+    }
   }
 
   if (field.type !== 'upload' && field.type !== 'relationship') {
@@ -336,16 +358,131 @@ export function resolveUploadCollection(
 }
 
 /**
+ * Collect dot-paths to all `json` type fields within a FieldInfo tree.
+ * Used by --examples to know which fields to extract from sample documents.
+ */
+export function collectJsonFieldPaths(fields: FieldInfo[], prefix = ''): string[] {
+  const paths: string[] = []
+  for (const field of fields) {
+    const path = prefix ? `${prefix}.${field.name}` : field.name
+    if (field.type === 'json') {
+      paths.push(path)
+    }
+    if (field.fields) {
+      if (field.type === 'block') {
+        // For blocks, fields are nested inside the block content
+        paths.push(...collectJsonFieldPaths(field.fields, path))
+      } else {
+        paths.push(...collectJsonFieldPaths(field.fields, path))
+      }
+    }
+  }
+  return paths
+}
+
+/**
+ * Summarize a JSON value's structure for display.
+ * Produces a compact shape description like:
+ *   { headers: string[], rows: string[][] }
+ *
+ * For arrays, inspects the first element to determine element shape.
+ * Truncates long string values but shows the structure clearly.
+ */
+export function summarizeJsonStructure(value: unknown, maxDepth = 4, depth = 0): string {
+  if (depth >= maxDepth) {
+    return '...'
+  }
+
+  if (value === null || value === undefined) {
+    return String(value)
+  }
+  if (typeof value === 'string') {
+    if (value.length > 30) {
+      return `"${value.slice(0, 27)}..."`
+    }
+    return `"${value}"`
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return '[]'
+    }
+    const first = summarizeJsonStructure(value[0], maxDepth, depth + 1)
+    const countHint = value.length > 1 ? `  // ${value.length} items` : ''
+    return `[${first}, ...]${countHint}`
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+    if (entries.length === 0) {
+      return '{}'
+    }
+    const parts = entries.map(([k, v]) => `${k}: ${summarizeJsonStructure(v, maxDepth, depth + 1)}`)
+    const oneLine = `{ ${parts.join(', ')} }`
+    if (oneLine.length <= 120) {
+      return oneLine
+    }
+    return `{\n${parts.map((p) => `${'  '.repeat(depth + 1)}${p}`).join(',\n')}\n${'  '.repeat(depth)}}`
+  }
+
+  return String(value)
+}
+
+/**
+ * Extract a nested value from an object using a dot-path.
+ * Handles arrays by picking the first element.
+ * e.g. "sizeTable.data" from { sizeTable: { data: {...} } }
+ */
+export function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  const segments = path.split('.')
+  let current: unknown = obj
+
+  for (const segment of segments) {
+    if (current === null || current === undefined) {
+      return undefined
+    }
+    if (Array.isArray(current)) {
+      // Pick first element of array
+      current = current[0]
+      if (current === null || current === undefined) {
+        return undefined
+      }
+    }
+    if (typeof current === 'object') {
+      current = (current as Record<string, unknown>)[segment]
+    } else {
+      return undefined
+    }
+  }
+
+  return current
+}
+
+/**
  * Format a FieldInfo into a human-readable description line.
  */
-export function formatFieldLine(field: FieldInfo, indent = 0): string[] {
+export function formatFieldLine(
+  field: FieldInfo,
+  indent = 0,
+  jsonExamples?: Map<string, unknown>,
+  fieldPath?: string,
+): string[] {
   const lines: string[] = []
   const pad = ' '.repeat(indent)
   const flags: string[] = []
 
-  if (field.required) flags.push('required')
-  if (field.localized) flags.push('localized')
-  if (field.hasDefault) flags.push('has default')
+  if (field.required) {
+    flags.push('required')
+  }
+  if (field.localized) {
+    flags.push('localized')
+  }
+  if (field.hasDefault) {
+    flags.push('has default')
+  }
 
   let typeSuffix = ''
   if (field.relationTo) {
@@ -363,10 +500,21 @@ export function formatFieldLine(field: FieldInfo, indent = 0): string[] {
 
   lines.push(`${pad}${field.name}: ${field.type}${typeSuffix}${flagStr}${labelStr}${descStr}`)
 
+  // Show example for json fields when --examples data is available
+  const currentPath = fieldPath ? `${fieldPath}.${field.name}` : field.name
+  if (field.type === 'json' && jsonExamples) {
+    const example = jsonExamples.get(currentPath)
+    if (example !== undefined && example !== null) {
+      const summary = summarizeJsonStructure(example)
+      const examplePad = ' '.repeat(indent + 2)
+      lines.push(`${examplePad}Example: ${summary}`)
+    }
+  }
+
   // Recurse into sub-fields
   if (field.fields && field.fields.length > 0) {
     for (const sub of field.fields) {
-      lines.push(...formatFieldLine(sub, indent + 2))
+      lines.push(...formatFieldLine(sub, indent + 2, jsonExamples, currentPath))
     }
   }
 

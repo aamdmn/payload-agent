@@ -15,9 +15,10 @@ Built for AI coding agents (Opencode, Claude Code, etc.) but works great for hum
 
 ```bash
 cd your-payload-project
-npx payload-agent collections            # discover
-npx payload-agent describe posts         # understand schema
-npx payload-agent find posts --limit 5   # read
+npx payload-agent collections                  # discover
+npx payload-agent describe posts               # understand schema
+npx payload-agent describe posts --examples    # see JSON field structures
+npx payload-agent find posts --limit 5         # read
 npx payload-agent create posts --data '{"title":"Hello"}' # write
 ```
 
@@ -33,7 +34,7 @@ npx payload-agent find posts --config ./src/payload.config.ts
 | -------------------------------------------- | ----------------------------------------------------------------------- |
 | `collections`                                | List all collections                                                    |
 | `globals`                                    | List all globals                                                        |
-| `describe <name>`                            | Show full schema for a collection or global                             |
+| `describe <name> [--examples]`               | Show full schema (with sample JSON field structures)                    |
 | `status`                                     | Instance status                                                         |
 | `find <collection>`                          | Query documents (`--where`, `--limit`, `--sort`, `--select`, `--depth`) |
 | `find-by-id <collection> <id>`               | Get a single document                                                   |
@@ -79,6 +80,7 @@ The `--file` flag auto-detects the target upload collection from the field schem
 | `--fallback-locale <code>` | Fallback locale for reads (use `none` to disable)                          |
 | `--file 'field=./path'`    | Upload and attach file to a field                                          |
 | `--data @file.json`        | Read `--data` JSON from a file instead of inline                           |
+| `--examples`               | Show example values for `json` fields (use with `describe`)                |
 | `--include-sensitive`      | Include password hashes, API keys, etc.                                    |
 
 ## How It Works
@@ -101,11 +103,12 @@ The `skills/` directory contains a [Claude Code skill](https://claude.ai/docs/sk
 
 ```bash
 # Agents learn to:
-# 1. payload-agent collections        -> what exists?
-# 2. payload-agent describe posts     -> what fields?
-# 3. payload-agent find posts         -> what data?
-# 4. payload-agent create posts --data -> write
-# 5. payload-agent find-by-id posts   -> verify
+# 1. payload-agent collections              -> what exists?
+# 2. payload-agent describe posts           -> what fields?
+# 3. payload-agent describe posts --examples -> what shape are json fields?
+# 4. payload-agent find posts               -> what data?
+# 5. payload-agent create posts --data      -> write
+# 6. payload-agent find-by-id posts         -> verify
 ```
 
 ## Requirements

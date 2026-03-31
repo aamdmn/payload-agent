@@ -18,8 +18,9 @@ Output includes: slug, field count, whether it has auth or upload.
 Show the full schema for a collection or global. This is the most important command for agents -- always run it before creating or updating data.
 
 ```bash
-payload-agent describe posts          # Human-readable field tree
-payload-agent describe posts --json   # Structured JSON with full field metadata
+payload-agent describe posts              # Human-readable field tree
+payload-agent describe posts --json       # Structured JSON with full field metadata
+payload-agent describe posts --examples   # Include example values for json fields
 ```
 
 Output includes for each field:
@@ -31,6 +32,22 @@ Output includes for each field:
 - Select/radio options
 - Array/block sub-fields
 - Description (if set)
+
+### The `--examples` flag
+
+Use `--examples` when a collection has `json` type fields (custom editors, table data, etc.). The CLI samples one document from the collection and shows the actual structure of each json field:
+
+```
+sizeTable: group "Size Table"
+  title: text (localized, has default) "Title"
+  data: json (localized) "Table Data (JSON)"
+    Example: { headers: ["Size", ...], rows: [["S", "69-69", ...], ...] }
+  note: textarea (localized) "Note"
+```
+
+This tells you exactly what shape the json field expects, so you don't have to guess. With `--json`, the examples are included as a `jsonExamples` object containing the path, structure summary, and full sample value.
+
+If the collection is empty (no documents to sample), a note is shown instead.
 
 ---
 

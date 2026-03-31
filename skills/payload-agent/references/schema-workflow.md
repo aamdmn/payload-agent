@@ -42,6 +42,23 @@ From this you learn:
 - `tags` is an **array** of objects with a `tag` text field
 - `id`, `createdAt`, `updatedAt` are **auto-generated** -- never set them manually
 
+### JSON fields: use `--examples`
+
+If the schema contains `json` type fields (custom editors, table data, config objects), the `describe` output only shows `json` as the type -- it can't tell you the expected shape. Use `--examples` to sample a real document and see the structure:
+
+```bash
+payload-agent describe products --examples
+```
+
+This adds an `Example:` line below each json field showing the actual data shape:
+
+```
+data: json (localized) "Table Data (JSON)"
+  Example: { headers: ["Size", ...], rows: [["S", "69-69", ...], ...] }
+```
+
+This is especially useful for fields that use custom UI components (size table editors, config builders, etc.) where the schema alone doesn't reveal the expected format.
+
 ## Step 3: Read Sample Data
 
 ```bash

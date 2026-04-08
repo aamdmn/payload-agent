@@ -26,7 +26,8 @@ Usage: payload-agent <command> [arguments] [flags]
 
 Introspection:
   collections                         List all collections
-  describe <collection|global>        Show full schema for a collection or global
+  describe <collection|global>        Show TypeScript interface (data shape)
+    [--fields]                          Show detailed field breakdown instead
     [--examples]                        Include example values for json fields
   globals                             List all globals
   status                              Show Payload instance status
@@ -74,6 +75,7 @@ Global Flags:
 Examples:
   payload-agent collections
   payload-agent describe posts
+  payload-agent describe posts --fields
   payload-agent find posts --limit 5
   payload-agent find posts --where '{"status":{"equals":"published"}}'
   payload-agent find-by-id posts 6789abcdef

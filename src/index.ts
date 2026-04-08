@@ -28,3 +28,11 @@ export {
   resolveFieldPath,
   resolveUploadCollection,
 } from './utils/schema-introspection.js'
+export type { TypesResult } from './utils/types-extractor.js'
+export {
+  extractInterface,
+  extractLocaleType,
+  findPayloadTypesFile,
+  getTypeInterface,
+  resolveTypeName,
+} from './utils/types-extractor.js'

@@ -17,7 +17,8 @@ Always follow this pattern when working with PayloadCMS data:
 payload-agent collections
 
 # 2. UNDERSTAND the schema before writing
-payload-agent describe posts
+payload-agent describe posts              # TypeScript interface (exact data shape)
+payload-agent describe posts --fields     # detailed field breakdown (constraints, localized flags)
 payload-agent describe posts --examples   # see json field shapes
 
 # 3. READ existing data
@@ -32,7 +33,7 @@ payload-agent find-by-id posts <id>
 
 ## Rules
 
-1. **ALWAYS run `payload-agent describe <collection>` before creating or updating documents.** This shows you all fields, their types, which are required, and what values are accepted. Use `--examples` to see the expected structure of `json` fields (custom editors, tables, etc.).
+1. **ALWAYS run `payload-agent describe <collection>` before creating or updating documents.** This outputs the TypeScript interface from `payload-types.ts` showing the exact data shape Payload expects — optional fields have `?`, union types show valid values, relationship types show what they resolve to. Use `--fields` for a detailed field breakdown with constraints, localized flags, and defaults. Use `--examples` to see the expected structure of `json` fields (custom editors, tables, etc.).
 
 2. **ALWAYS preview destructive operations.** `payload-agent delete` and `payload-agent delete-many` show a preview by default. Only add `--confirm` after verifying the preview.
 
@@ -48,7 +49,8 @@ payload-agent find-by-id posts <id>
 
 ```bash
 payload-agent collections                          # List all collections
-payload-agent describe <collection|global>         # Show full schema
+payload-agent describe <collection|global>         # Show TypeScript interface (exact data shape)
+payload-agent describe <collection> --fields       # Show detailed field breakdown
 payload-agent describe <collection> --examples     # Show schema + example json field structures
 payload-agent globals                              # List all globals
 payload-agent status                               # Show instance status

@@ -13,12 +13,14 @@ import {
   getNestedValue,
   summarizeJsonStructure,
 } from '../utils/schema-introspection.js'
+import { getTypeInterface } from '../utils/types-extractor.js'
 
 /**
- * payload-agent describe <collection|global> - Show full schema details.
+ * payload-agent describe <collection|global> - Show schema details.
  *
- * Supports --examples flag: samples an existing document to show
- * the expected structure of `json` fields (e.g. custom editors).
+ * Default: outputs the TypeScript interface from payload-types.ts.
+ * --fields: outputs the detailed field breakdown (constraints, localized flags, etc.)
+ * --examples: samples a document to show json field structures (additive).
  */
 export async function describeCommand(
   payload: Payload,
@@ -36,18 +38,27 @@ export async function describeCommand(
 
   const flags = parseFlags(args)
   const withExamples = flags.examples === 'true'
+  const withFields = flags.fields === 'true'
 
   // Check if it's a collection
   const collections = getCollectionSlugs(payload)
   const globals = getGlobalSlugs(payload)
 
   if (collections.includes(slug)) {
-    await describeCollection(payload, slug, opts, withExamples)
+    if (withFields) {
+      await describeCollection(payload, slug, opts, withExamples)
+      return
+    }
+    describeTypes(payload, slug, 'collection', opts)
     return
   }
 
   if (globals.includes(slug)) {
-    await describeGlobal(payload, slug, opts, withExamples)
+    if (withFields) {
+      await describeGlobal(payload, slug, opts, withExamples)
+      return
+    }
+    describeTypes(payload, slug, 'global', opts)
     return
   }
 
@@ -222,6 +233,55 @@ async function describeGlobal(
   if (withExamples && (!jsonExamples || jsonExamples.size === 0)) {
     lines.push('')
     lines.push('Note: No json field examples available (global has no data or no json fields).')
+  }
+
+  console.log(lines.join('\n'))
+}
+
+/**
+ * Output the TypeScript interface from payload-types.ts for a collection or global.
+ */
+function describeTypes(
+  payload: Payload,
+  slug: string,
+  kind: 'collection' | 'global',
+  opts: Partial<OutputOptions>,
+): void {
+  const result = getTypeInterface(payload, slug, kind)
+
+  if ('error' in result) {
+    console.error(`Error: ${result.error}`)
+    process.exit(1)
+  }
+
+  if (opts.json) {
+    output(
+      {
+        slug,
+        type: kind,
+        filePath: result.filePath,
+        locale: result.locale || null,
+        interface: result.interface,
+        referencedTypes: result.referencedTypes,
+      },
+      opts,
+    )
+    return
+  }
+
+  const lines: string[] = []
+
+  if (result.locale) {
+    lines.push(`Locales: ${result.locale}`)
+    lines.push('')
+  }
+
+  lines.push(result.interface)
+
+  if (result.referencedTypes.length > 0) {
+    lines.push('')
+    lines.push(`Referenced types: ${result.referencedTypes.join(', ')}`)
+    lines.push("Hint: Run 'payload-agent describe <slug>' for any referenced collection/global.")
   }
 
   console.log(lines.join('\n'))

@@ -14,6 +14,7 @@
 ### Fixed
 
 - Bounded the default in-memory state adapter: a 60s sweep (unref'ed, started on `connect()` and cleared on `disconnect()`) reclaims expired cache values, lists, dedupe keys, queue entries, and locks even when their keys are never read again, and a per-map entry cap (`maxEntries`, default 10,000) evicts the least-recently-written entry first so a long-lived process no longer grows with total message/thread traffic. Held locks are never evicted by the cap
+- Hardened URL uploads against DNS rebinding: `safeFetch` now pins the connection to the addresses it validated for each hop instead of handing the hostname to a client that resolves it again at connect time. TLS SNI, the certificate check, and the `Host` header still use the original hostname. Requests ask for `accept-encoding: identity` and reject a response the server compressed anyway, so the bytes read and capped are always the file itself. Address validation also now blocks IPv4-mapped IPv6 in hex form (`::ffff:7f00:1`), NAT64 addresses that embed a private IPv4 (`64:ff9b::/96`), 6to4 relays, IPv4-compatible forms, `100::/64`, and the full multicast and broadcast ranges
 
 ## [0.10.0] - 2026-06-07
 

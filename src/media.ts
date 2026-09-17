@@ -162,7 +162,7 @@ export async function fileFromUrl(
   options: FetchFileOptions = {}
 ): Promise<ResolvedFile> {
   const {
-    fetchImpl = fetch,
+    fetchImpl,
     lookup,
     maxBytes = DEFAULT_MAX_FILE_BYTES,
     timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,

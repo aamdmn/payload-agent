@@ -16,12 +16,15 @@ import type { Lock, QueueEntry, StateAdapter } from "chat";
  *
  * Memory bounds: a 60s sweep reclaims expired cache entries, locks, and queue
  * entries even if their keys are never read again, and `maxEntries` (default
- * 10,000 per map) evicts the oldest inserted entries once capacity is reached.
- * Sweep/capacity eviction never touches the subscriptions set; lock eviction
- * happens only through TTL expiry.
+ * 10,000 per map) caps each map by evicting the least-recently-written entry.
+ * Writes (set/appendToList/enqueue) move a key to the end of its map; reads do
+ * not change recency. Capacity-triggered sweeps are throttled to once per
+ * second. Sweep/capacity eviction never touches the subscriptions set; lock
+ * eviction happens only through TTL expiry.
  */
 
 const SWEEP_INTERVAL_MS = 60_000;
+const SWEEP_THROTTLE_MS = 1000;
 const DEFAULT_MAX_ENTRIES = 10_000;
 
 interface CacheEntry {
@@ -41,6 +44,8 @@ export class MemoryStateAdapter implements StateAdapter {
   private readonly queues = new Map<string, QueueEntry[]>();
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private readonly maxEntries: number;
+  private lastSweepAt = 0;
+  private sweepCount = 0;
 
   constructor(options: { maxEntries?: number } = {}) {
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
@@ -50,11 +55,17 @@ export class MemoryStateAdapter implements StateAdapter {
   }
 
   /** @internal Stored counts for tests; does not trigger expiration cleanup. */
-  getStoredCounts(): { cache: number; locks: number; queues: number } {
+  getStoredCounts(): {
+    cache: number;
+    locks: number;
+    queues: number;
+    sweeps: number;
+  } {
     return {
       cache: this.cache.size,
       locks: this.locks.size,
       queues: this.queues.size,
+      sweeps: this.sweepCount,
     };
   }
 
@@ -163,6 +174,7 @@ export class MemoryStateAdapter implements StateAdapter {
   // biome-ignore lint/suspicious/useAwait: interface requires an async method
   async set<T = unknown>(key: string, value: T, ttlMs?: number): Promise<void> {
     this.ensureConnected();
+    this.cache.delete(key);
     this.makeRoom(this.cache, key);
     this.cache.set(key, {
       value,
@@ -185,6 +197,7 @@ export class MemoryStateAdapter implements StateAdapter {
         return false;
       }
     }
+    this.cache.delete(key);
     this.makeRoom(this.cache, key);
     this.cache.set(key, {
       value,
@@ -222,6 +235,7 @@ export class MemoryStateAdapter implements StateAdapter {
       list = list.slice(list.length - options.maxLength);
     }
 
+    this.cache.delete(key);
     this.makeRoom(this.cache, key);
     this.cache.set(key, {
       value: list,
@@ -261,12 +275,12 @@ export class MemoryStateAdapter implements StateAdapter {
     if (queue.length > maxSize) {
       queue.splice(0, queue.length - maxSize);
     }
+    this.queues.delete(threadId);
     if (queue.length === 0) {
-      this.queues.delete(threadId);
-    } else {
-      this.makeRoom(this.queues, threadId);
-      this.queues.set(threadId, queue);
+      return 0;
     }
+    this.makeRoom(this.queues, threadId);
+    this.queues.set(threadId, queue);
     return queue.length;
   }
 
@@ -293,15 +307,16 @@ export class MemoryStateAdapter implements StateAdapter {
   }
 
   /**
-   * Bounds a map at `maxEntries`. The key being written is exempt so updates
-   * to an existing entry never evict it, and held locks are never evicted by
-   * the queue path because locks live in their own map.
+   * Bounds a map at `maxEntries`. Callers delete the key before re-inserting
+   * it, so a write moves the key to the end and the least-recently-written
+   * entry is evicted. The capacity-triggered sweep is throttled, so a map
+   * full of non-expired entries does not rescan on every write.
    */
   private makeRoom<T>(entries: Map<string, T>, key: string): void {
     if (entries.has(key) || entries.size < this.maxEntries) {
       return;
     }
-    this.sweepExpired();
+    this.maybeSweep();
     if (entries.size >= this.maxEntries) {
       const oldest = entries.keys().next();
       if (!oldest.done) {
@@ -310,13 +325,23 @@ export class MemoryStateAdapter implements StateAdapter {
     }
   }
 
+  private maybeSweep(): void {
+    if (Date.now() - this.lastSweepAt < SWEEP_THROTTLE_MS) {
+      return;
+    }
+    this.sweepExpired();
+  }
+
   /**
    * Reclaims expired entries across cache, locks, and queues so memory does
    * not grow with keys that are never read again. Runs on a timer started by
-   * `connect()` and opportunistically when capacity pressure requires it.
+   * `connect()` and opportunistically, throttled, when capacity pressure
+   * requires it.
    */
   private sweepExpired(): void {
-    const now = Date.now();
+    this.lastSweepAt = Date.now();
+    this.sweepCount += 1;
+    const now = this.lastSweepAt;
     for (const [key, entry] of this.cache) {
       if (entry.expiresAt !== null && entry.expiresAt <= now) {
         this.cache.delete(key);

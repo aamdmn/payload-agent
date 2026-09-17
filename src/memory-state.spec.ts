@@ -127,6 +127,7 @@ describe("sweep", () => {
       cache: 2,
       locks: 1,
       queues: 1,
+      sweeps: 0,
     });
 
     vi.advanceTimersByTime(SWEEP_INTERVAL_MS);
@@ -135,12 +136,90 @@ describe("sweep", () => {
       cache: 1,
       locks: 0,
       queues: 0,
+      sweeps: 1,
     });
     expect(await adapter.get("live")).toBe("value");
   });
 });
 
 describe("capacity", () => {
+  test("writes move the key to the end so the least-recently-written entry is evicted", async () => {
+    const bounded = new MemoryStateAdapter({ maxEntries: 3 });
+    await bounded.connect();
+    await bounded.set("a", 1);
+    await bounded.set("b", 2);
+    await bounded.set("c", 3);
+
+    await bounded.set("a", 1.5);
+    await bounded.set("d", 4);
+
+    expect(await bounded.get("a")).toBe(1.5);
+    expect(await bounded.get("b")).toBeNull();
+    expect(await bounded.get("c")).toBe(3);
+    expect(await bounded.get("d")).toBe(4);
+    await bounded.disconnect();
+  });
+
+  test("appendToList refreshes recency so a busy history list survives", async () => {
+    const bounded = new MemoryStateAdapter({ maxEntries: 3 });
+    await bounded.connect();
+    await bounded.appendToList("history", "m1", { maxLength: 5 });
+    await bounded.set("other-1", 1);
+    await bounded.set("other-2", 2);
+
+    await bounded.appendToList("history", "m2", { maxLength: 5 });
+    await bounded.set("other-3", 3);
+
+    expect(await bounded.getList("history")).toEqual(["m1", "m2"]);
+    expect(await bounded.get("other-1")).toBeNull();
+    await bounded.disconnect();
+  });
+
+  test("enqueue refreshes recency so an active queue survives", async () => {
+    const bounded = new MemoryStateAdapter({ maxEntries: 3 });
+    await bounded.connect();
+    await bounded.enqueue("active", queueEntry("m1", 60_000), 10);
+    await bounded.enqueue("idle-1", queueEntry("i1", 60_000), 10);
+    await bounded.enqueue("idle-2", queueEntry("i2", 60_000), 10);
+
+    await bounded.enqueue("active", queueEntry("m2", 60_000), 10);
+    await bounded.enqueue("idle-3", queueEntry("i3", 60_000), 10);
+
+    expect(await bounded.queueDepth("active")).toBe(2);
+    expect(await bounded.queueDepth("idle-1")).toBe(0);
+    await bounded.disconnect();
+  });
+
+  test("reads do not refresh recency", async () => {
+    const bounded = new MemoryStateAdapter({ maxEntries: 2 });
+    await bounded.connect();
+    await bounded.set("a", 1);
+    await bounded.set("b", 2);
+
+    expect(await bounded.get("a")).toBe(1);
+    await bounded.set("c", 3);
+
+    expect(await bounded.get("a")).toBeNull();
+    await bounded.disconnect();
+  });
+
+  test("capacity-triggered sweeps are throttled to once per second", async () => {
+    const bounded = new MemoryStateAdapter({ maxEntries: 1 });
+    await bounded.connect();
+    await bounded.set("a", 1);
+    await bounded.set("b", 2);
+    expect(bounded.getStoredCounts().sweeps).toBe(1);
+
+    await bounded.set("c", 3);
+    await bounded.set("d", 4);
+    expect(bounded.getStoredCounts().sweeps).toBe(1);
+
+    vi.advanceTimersByTime(1001);
+    await bounded.set("e", 5);
+    expect(bounded.getStoredCounts().sweeps).toBe(2);
+    await bounded.disconnect();
+  });
+
   test("evicts the oldest cache entry once maxEntries is reached", async () => {
     const bounded = new MemoryStateAdapter({ maxEntries: 2 });
     await bounded.connect();

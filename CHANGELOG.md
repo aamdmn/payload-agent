@@ -13,7 +13,7 @@
 
 ### Fixed
 
-- Bounded the default in-memory state adapter: a 60s sweep (unref'ed, started on `connect()` and cleared on `disconnect()`) reclaims expired cache values, lists, dedupe keys, queue entries, and locks even when their keys are never read again, and a per-map entry cap (`maxEntries`, default 10,000) evicts the oldest entries first so a long-lived process no longer grows with total message/thread traffic. Held locks are never evicted by the cap
+- Bounded the default in-memory state adapter: a 60s sweep (unref'ed, started on `connect()` and cleared on `disconnect()`) reclaims expired cache values, lists, dedupe keys, queue entries, and locks even when their keys are never read again, and a per-map entry cap (`maxEntries`, default 10,000) evicts the least-recently-written entry first so a long-lived process no longer grows with total message/thread traffic. Held locks are never evicted by the cap
 
 ## [0.10.0] - 2026-06-07
 

@@ -1,2 +1,8 @@
 packages:
   - site
+allowBuilds:
+  "@swc/core": true
+  esbuild: true
+  isolated-vm: true
+  sharp: true
+  unrs-resolver: true

@@ -11,6 +11,10 @@
 - Upgraded development dependencies to Payload 3.89, Next.js 16.3.5, React 19.3, Vitest 5, Vite 8, and TypeScript 7, with updated build and test tooling. Build approvals now use `pnpm-workspace.yaml`, supporting pnpm `>=10.26.0` without an upper bound
 - Upgraded bundled Zod to `^4.6.5`
 
+### Fixed
+
+- Bounded the default in-memory state adapter: a 60s sweep (unref'ed, started on `connect()` and cleared on `disconnect()`) reclaims expired cache values, lists, dedupe keys, queue entries, and locks even when their keys are never read again, and a per-map entry cap (`maxEntries`, default 10,000) evicts the least-recently-written entry first so a long-lived process no longer grows with total message/thread traffic. Held locks are never evicted by the cap
+
 ## [0.10.0] - 2026-06-07
 
 ### Breaking Changes

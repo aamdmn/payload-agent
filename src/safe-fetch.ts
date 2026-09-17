@@ -1,11 +1,16 @@
 import { lookup as dnsLookup } from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
 import { isIP } from "node:net";
+import { Readable } from "node:stream";
 
 /**
  * SSRF-resistant fetch. The agent can be asked to upload a file "from a URL",
  * which would otherwise let a chat user point the server at internal services
  * or the cloud metadata endpoint. This module restricts outbound requests to
  * http(s) and to publicly routable addresses, validating every redirect hop.
+ * The connection itself is pinned to the addresses validated for that hop, so
+ * DNS cannot change between validation and connect (rebinding).
  */
 
 /** Resolves a hostname to its IP addresses. */
@@ -21,8 +26,16 @@ export interface SafeFetchOptions {
 const DEFAULT_MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-const V4_MAPPED_DOTTED = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/;
-const V4_MAPPED_HEX = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/;
+const DEFAULT_PORTS: Record<string, number> = {
+  "http:": 80,
+  "https:": 443,
+};
+
+const V4_MAPPED_DOTTED = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/;
+const V4_MAPPED_SUFFIX_HEX = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/;
+const V4_MAPPED_PREFIX = "::ffff:";
+const NAT64_PREFIX = "64:ff9b:";
+const SIX_TO_FOUR = /^2002:([0-9a-f]{1,4}):([0-9a-f]{1,4})/;
 const LEADING_BRACKET = /^\[/;
 const TRAILING_BRACKET = /\]$/;
 
@@ -69,21 +82,45 @@ function isPrivateV4(ip: string): boolean {
   });
 }
 
-/** Pull the embedded IPv4 out of an IPv4-mapped IPv6 address, if present. */
+/** Pull the embedded IPv4 out of an IPv4-mapped or NAT64 IPv6 address. */
 function mappedV4(addr: string): null | string {
-  const dotted = V4_MAPPED_DOTTED.exec(addr);
-  if (dotted) {
-    return dotted[1];
+  if (addr.startsWith(V4_MAPPED_PREFIX)) {
+    const rest = addr.slice(V4_MAPPED_PREFIX.length);
+    if (V4_MAPPED_DOTTED.test(rest)) {
+      return rest;
+    }
+    const hex = V4_MAPPED_SUFFIX_HEX.exec(rest);
+    if (hex) {
+      return hexPairToV4(hex[1], hex[2]);
+    }
+    return null;
   }
 
-  const hex = V4_MAPPED_HEX.exec(addr);
-  if (hex) {
-    const high = Number.parseInt(hex[1], 16);
-    const low = Number.parseInt(hex[2], 16);
-    return `${Math.floor(high / V4_BYTE)}.${high % V4_BYTE}.${Math.floor(low / V4_BYTE)}.${low % V4_BYTE}`;
+  // NAT64 (64:ff9b::/96) embeds an IPv4 address in its last 32 bits.
+  if (addr.startsWith(NAT64_PREFIX)) {
+    const rest = addr.slice(NAT64_PREFIX.length);
+    if (V4_MAPPED_DOTTED.test(rest)) {
+      return rest;
+    }
+    const groups = rest.split(":").filter(Boolean);
+    if (groups.length === 0) {
+      return "0.0.0.0";
+    }
+    if (groups.length === 1) {
+      return hexPairToV4("0", groups[0]);
+    }
+    if (groups.length === 2) {
+      return hexPairToV4(groups[0], groups[1]);
+    }
   }
 
   return null;
+}
+
+function hexPairToV4(highHex: string, lowHex: string): string {
+  const high = Number.parseInt(highHex, 16);
+  const low = Number.parseInt(lowHex, 16);
+  return `${Math.floor(high / V4_BYTE)}.${high % V4_BYTE}.${Math.floor(low / V4_BYTE)}.${low % V4_BYTE}`;
 }
 
 function isPrivateV6(ip: string): boolean {
@@ -98,6 +135,26 @@ function isPrivateV6(ip: string): boolean {
     return true;
   }
 
+  // Deprecated IPv4-compatible (::/96) and other ::-prefixed forms are either
+  // an embedded IPv4 or reserved space; none of them is public unicast.
+  if (addr.startsWith("::")) {
+    const rest = addr.slice(2);
+    if (V4_MAPPED_DOTTED.test(rest)) {
+      return isPrivateV4(rest);
+    }
+    const hex = V4_MAPPED_SUFFIX_HEX.exec(rest);
+    if (hex) {
+      return isPrivateV4(hexPairToV4(hex[1], hex[2]));
+    }
+    return true;
+  }
+
+  // 6to4 (2002::/16) embeds the relayed IPv4 address in the next 32 bits.
+  const sixToFour = SIX_TO_FOUR.exec(addr);
+  if (sixToFour) {
+    return isPrivateV4(hexPairToV4(sixToFour[1], sixToFour[2]));
+  }
+
   const head = addr.split(":")[0];
   if (!head) {
     return false;
@@ -107,7 +164,9 @@ function isPrivateV6(ip: string): boolean {
   const isUniqueLocal = first >= 0xfc_00 && first <= 0xfd_ff;
   const isLinkLocal = first >= 0xfe_80 && first <= 0xfe_bf;
   const isMulticast = first >= 0xff_00;
-  return isUniqueLocal || isLinkLocal || isMulticast;
+  // 0100::/8 (includes the 100::/64 discard-only prefix) is IETF-reserved.
+  const isIetfReserved = first >= 0x01_00 && first <= 0x01_ff;
+  return isUniqueLocal || isLinkLocal || isMulticast || isIetfReserved;
 }
 
 /**
@@ -139,6 +198,20 @@ export async function assertPublicUrl(
   url: string,
   lookup: HostLookup = defaultLookup
 ): Promise<URL> {
+  const { parsed } = await validateUrlAddresses(url, lookup);
+  return parsed;
+}
+
+/**
+ * Validate a URL and return the parsed URL together with every address that
+ * passed validation, so the connection can be pinned to exactly those. If the
+ * hostname resolves to several addresses and ANY is non-public, the whole
+ * request is rejected (fail closed).
+ */
+async function validateUrlAddresses(
+  url: string,
+  lookup: HostLookup
+): Promise<{ parsed: URL; addresses: string[] }> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -150,6 +223,10 @@ export async function assertPublicUrl(
     throw new Error(
       `Unsupported URL scheme "${parsed.protocol}". Only http and https are allowed.`
     );
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error(`URL must not include credentials: ${url}`);
   }
 
   const host = parsed.hostname
@@ -172,19 +249,106 @@ export async function assertPublicUrl(
     }
   }
 
-  return parsed;
+  return { parsed, addresses };
 }
 
 /**
- * Fetch a URL, following redirects manually so every hop is re-validated as
- * public. Returns the final (non-redirect) response without reading its body.
+ * Perform a single HTTP(S) request whose TCP connection can only go to the
+ * given, already-validated address. The custom `lookup` returns that address
+ * verbatim, so no second DNS resolution (and thus no rebinding window) exists
+ * between validation and connect. TLS SNI, the certificate check, and the
+ * `Host` header still use the original hostname. The response is converted to
+ * a web `Response` so callers can stream it with the usual APIs.
+ *
+ * Exported for tests only. Application code must go through `safeFetch`, which
+ * validates the URL and picks the address.
+ *
+ * @internal
+ */
+export function pinnedRequest(
+  url: URL,
+  address: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const isHttps = url.protocol === "https:";
+    const transport = isHttps ? https : http;
+    const port = url.port
+      ? Number(url.port)
+      : (DEFAULT_PORTS[url.protocol] ?? 80);
+
+    // Return the single pinned address in the shape http.request expects.
+    // node:http calls lookup with { all: true } and consumes the array form.
+    const lookup = (
+      _hostname: string,
+      options: { all?: boolean },
+      callback: (
+        error: NodeJS.ErrnoException | null,
+        address: string | { address: string; family: number }[],
+        family?: number
+      ) => void
+    ): void => {
+      const family = isIP(address) === 6 ? 6 : 4;
+      if (options?.all) {
+        callback(null, [{ address, family }]);
+        return;
+      }
+      callback(null, address, family);
+    };
+
+    const request = transport.request(
+      {
+        host: url.hostname,
+        port,
+        path: `${url.pathname}${url.search}`,
+        method: "GET",
+        lookup,
+        setHost: false,
+        headers: { Host: url.host },
+        signal,
+      },
+      (incoming) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (Array.isArray(value)) {
+            for (const entry of value) {
+              headers.append(name, entry);
+            }
+          } else if (typeof value === "string") {
+            headers.set(name, value);
+          }
+        }
+
+        const body = Readable.toWeb(
+          incoming
+        ) as unknown as ReadableStream<Uint8Array>;
+        resolve(
+          new Response(body, {
+            status: incoming.statusCode ?? 0,
+            headers,
+          })
+        );
+      }
+    );
+
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+/**
+ * Fetch a URL, following redirects manually so every hop is re-resolved,
+ * re-validated, and pinned to the addresses validated for that hop. When a
+ * `fetchImpl` is injected it is used as-is (tests); otherwise the request is
+ * made with node:http/https pinned to the validated address. Returns the final
+ * (non-redirect) response without reading its body.
  */
 export async function safeFetch(
   url: string,
   options: SafeFetchOptions = {}
 ): Promise<Response> {
   const {
-    fetchImpl = fetch,
+    fetchImpl,
     lookup,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     signal,
@@ -193,11 +357,14 @@ export async function safeFetch(
   let currentUrl = url;
 
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
-    const parsed = await assertPublicUrl(currentUrl, lookup);
-    const response = await fetchImpl(parsed.href, {
-      redirect: "manual",
-      signal,
-    });
+    const { parsed, addresses } = await validateUrlAddresses(
+      currentUrl,
+      lookup ?? defaultLookup
+    );
+
+    const response = fetchImpl
+      ? await fetchImpl(parsed.href, { redirect: "manual", signal })
+      : await pinnedRequest(parsed, addresses[0], signal);
 
     if (!REDIRECT_STATUSES.has(response.status)) {
       return response;

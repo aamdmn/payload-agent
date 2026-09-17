@@ -1,7 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "payload/node";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
 const filename = fileURLToPath(import.meta.url);
@@ -19,11 +18,9 @@ export default defineConfig(() => {
   process.env.TELEGRAM_BOT_TOKEN = "";
 
   return {
-    plugins: [
-      tsconfigPaths({
-        ignoreConfigErrors: true,
-      }),
-    ],
+    resolve: {
+      tsconfigPaths: true,
+    },
     test: {
       environment: "node",
       exclude: ["**/node_modules/**"],

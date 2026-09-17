@@ -1,6 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
+import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   assertPublicUrl,
@@ -15,6 +16,7 @@ const SCHEME_ERROR = /scheme/;
 const REDIRECTS_ERROR = /redirects/;
 const SIZE_ERROR = /limit/;
 const CREDENTIALS_ERROR = /credentials/;
+const GZIP_ENCODING_ERROR = /content-encoding: gzip/;
 
 const HAS_V6_LOOPBACK = Object.values(networkInterfaces())
   .flat()
@@ -241,10 +243,12 @@ describe("safeFetch", () => {
 
 describe("pinnedRequest", () => {
   const requests: {
+    acceptEncoding: string;
     host: string;
     method: string;
     remoteAddress: string;
     url: string;
+    userAgent: string;
   }[] = [];
   let server: http.Server;
   let port = 0;
@@ -252,10 +256,12 @@ describe("pinnedRequest", () => {
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       requests.push({
+        acceptEncoding: req.headers["accept-encoding"] ?? "",
         host: req.headers.host ?? "",
         method: req.method ?? "",
         remoteAddress: req.socket.remoteAddress ?? "",
         url: req.url ?? "",
+        userAgent: req.headers["user-agent"] ?? "",
       });
       if (req.url === "/redirect-to-file") {
         res.writeHead(302, { location: "file:///etc/passwd" });
@@ -267,8 +273,22 @@ describe("pinnedRequest", () => {
         res.write("partial");
         return;
       }
-      res.writeHead(200, { "content-type": "text/plain" });
-      res.end(`served ${req.url}`);
+      if (req.url === "/gzip") {
+        const compressed = gzipSync("compressed payload");
+        res.writeHead(200, {
+          "content-encoding": "gzip",
+          "content-length": String(compressed.length),
+          "content-type": "text/plain",
+        });
+        res.end(compressed);
+        return;
+      }
+      const body = `served ${req.url}`;
+      res.writeHead(200, {
+        "content-length": String(Buffer.byteLength(body)),
+        "content-type": "text/plain",
+      });
+      res.end(body);
     });
     await new Promise<void>((resolve) => {
       server.listen(0, "127.0.0.1", resolve);
@@ -299,6 +319,25 @@ describe("pinnedRequest", () => {
     expect(requests[0].remoteAddress).toBe("127.0.0.1");
     expect(requests[0].host).toBe(`rebind.example:${port}`);
     expect(requests[0].url).toBe("/data?q=1");
+    // The consumer's content-length pre-check needs this header intact.
+    expect(response.headers.get("content-length")).toBe(String(body.length));
+  });
+
+  test("asks for identity encoding and sends a user agent", async () => {
+    await pinnedRequest(
+      new URL(`http://rebind.example:${port}/headers`),
+      "127.0.0.1"
+    );
+
+    const last = requests.at(-1);
+    expect(last?.acceptEncoding).toBe("identity");
+    expect(last?.userAgent).not.toBe("");
+  });
+
+  test("rejects a response the server compressed anyway", async () => {
+    await expect(
+      pinnedRequest(new URL(`http://rebind.example:${port}/gzip`), "127.0.0.1")
+    ).rejects.toThrow(GZIP_ENCODING_ERROR);
   });
 
   test.skipIf(!HAS_V6_LOOPBACK)("pins IPv6 addresses", async () => {

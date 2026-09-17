@@ -31,6 +31,12 @@ const DEFAULT_PORTS: Record<string, number> = {
   "https:": 443,
 };
 
+// Ask servers not to compress, so the bytes read and capped are the file
+// itself. Mirror the previous client's user agent; some hosts reject requests
+// without one.
+const ACCEPT_ENCODING = "identity";
+const USER_AGENT = "node";
+
 const V4_MAPPED_DOTTED = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/;
 const V4_MAPPED_SUFFIX_HEX = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/;
 const V4_MAPPED_PREFIX = "::ffff:";
@@ -252,6 +258,30 @@ async function validateUrlAddresses(
   return { parsed, addresses };
 }
 
+/** Copy node:http response headers into a web Headers object. */
+function toWebHeaders(incoming: http.IncomingMessage): Headers {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(incoming.headers)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        headers.append(name, entry);
+      }
+    } else if (typeof value === "string") {
+      headers.set(name, value);
+    }
+  }
+  return headers;
+}
+
+/** The response encoding when it is not the identity encoding we asked for. */
+function unsupportedEncoding(incoming: http.IncomingMessage): null | string {
+  const encoding = incoming.headers["content-encoding"];
+  if (!encoding || encoding.toLowerCase() === ACCEPT_ENCODING) {
+    return null;
+  }
+  return encoding;
+}
+
 /**
  * Perform a single HTTP(S) request whose TCP connection can only go to the
  * given, already-validated address. The custom `lookup` returns that address
@@ -304,19 +334,23 @@ export function pinnedRequest(
         method: "GET",
         lookup,
         setHost: false,
-        headers: { Host: url.host },
+        headers: {
+          Host: url.host,
+          "accept-encoding": ACCEPT_ENCODING,
+          "user-agent": USER_AGENT,
+        },
         signal,
       },
       (incoming) => {
-        const headers = new Headers();
-        for (const [name, value] of Object.entries(incoming.headers)) {
-          if (Array.isArray(value)) {
-            for (const entry of value) {
-              headers.append(name, entry);
-            }
-          } else if (typeof value === "string") {
-            headers.set(name, value);
-          }
+        const encoding = unsupportedEncoding(incoming);
+        if (encoding) {
+          incoming.destroy();
+          reject(
+            new Error(
+              `Refusing a compressed response (content-encoding: ${encoding}) for ${url.href}; the server ignored accept-encoding: ${ACCEPT_ENCODING}.`
+            )
+          );
+          return;
         }
 
         const body = Readable.toWeb(
@@ -325,7 +359,7 @@ export function pinnedRequest(
         resolve(
           new Response(body, {
             status: incoming.statusCode ?? 0,
-            headers,
+            headers: toWebHeaders(incoming),
           })
         );
       }

@@ -13,7 +13,16 @@ import type { Lock, QueueEntry, StateAdapter } from "chat";
  * State lives in process memory: it does not persist across restarts and is not
  * shared across instances. For production, pass a persistent adapter such as
  * `@chat-adapter/state-redis` or `@chat-adapter/state-pg`.
+ *
+ * Memory bounds: a 60s sweep reclaims expired cache entries, locks, and queue
+ * entries even if their keys are never read again, and `maxEntries` (default
+ * 10,000 per map) evicts the oldest inserted entries once capacity is reached.
+ * Sweep/capacity eviction never touches the subscriptions set; lock eviction
+ * happens only through TTL expiry.
  */
+
+const SWEEP_INTERVAL_MS = 60_000;
+const DEFAULT_MAX_ENTRIES = 10_000;
 
 interface CacheEntry {
   expiresAt: null | number;
@@ -30,15 +39,40 @@ export class MemoryStateAdapter implements StateAdapter {
   private readonly locks = new Map<string, Lock>();
   private readonly cache = new Map<string, CacheEntry>();
   private readonly queues = new Map<string, QueueEntry[]>();
+  private sweepTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly maxEntries: number;
+
+  constructor(options: { maxEntries?: number } = {}) {
+    this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    if (!Number.isSafeInteger(this.maxEntries) || this.maxEntries < 1) {
+      throw new Error("maxEntries must be a positive safe integer.");
+    }
+  }
+
+  /** @internal Stored counts for tests; does not trigger expiration cleanup. */
+  getStoredCounts(): { cache: number; locks: number; queues: number } {
+    return {
+      cache: this.cache.size,
+      locks: this.locks.size,
+      queues: this.queues.size,
+    };
+  }
 
   // biome-ignore lint/suspicious/useAwait: interface requires an async method
   async connect(): Promise<void> {
+    if (this.connected) {
+      return;
+    }
     this.connected = true;
+    this.sweepTimer = setInterval(() => this.sweepExpired(), SWEEP_INTERVAL_MS);
+    this.sweepTimer.unref();
   }
 
   // biome-ignore lint/suspicious/useAwait: interface requires an async method
   async disconnect(): Promise<void> {
     this.connected = false;
+    clearInterval(this.sweepTimer);
+    this.sweepTimer = undefined;
     this.subscriptions.clear();
     this.locks.clear();
     this.cache.clear();
@@ -129,6 +163,7 @@ export class MemoryStateAdapter implements StateAdapter {
   // biome-ignore lint/suspicious/useAwait: interface requires an async method
   async set<T = unknown>(key: string, value: T, ttlMs?: number): Promise<void> {
     this.ensureConnected();
+    this.makeRoom(this.cache, key);
     this.cache.set(key, {
       value,
       expiresAt: ttlMs ? Date.now() + ttlMs : null,
@@ -150,6 +185,7 @@ export class MemoryStateAdapter implements StateAdapter {
         return false;
       }
     }
+    this.makeRoom(this.cache, key);
     this.cache.set(key, {
       value,
       expiresAt: ttlMs ? Date.now() + ttlMs : null,
@@ -186,6 +222,7 @@ export class MemoryStateAdapter implements StateAdapter {
       list = list.slice(list.length - options.maxLength);
     }
 
+    this.makeRoom(this.cache, key);
     this.cache.set(key, {
       value: list,
       expiresAt: options?.ttlMs ? Date.now() + options.ttlMs : null,
@@ -216,14 +253,19 @@ export class MemoryStateAdapter implements StateAdapter {
     maxSize: number
   ): Promise<number> {
     this.ensureConnected();
-    let queue = this.queues.get(threadId);
-    if (!queue) {
-      queue = [];
-      this.queues.set(threadId, queue);
+    this.cleanExpiredQueue(threadId, Date.now());
+    const queue = this.queues.get(threadId) ?? [];
+    if (entry.expiresAt > Date.now()) {
+      queue.push(entry);
     }
-    queue.push(entry);
     if (queue.length > maxSize) {
       queue.splice(0, queue.length - maxSize);
+    }
+    if (queue.length === 0) {
+      this.queues.delete(threadId);
+    } else {
+      this.makeRoom(this.queues, threadId);
+      this.queues.set(threadId, queue);
     }
     return queue.length;
   }
@@ -231,6 +273,7 @@ export class MemoryStateAdapter implements StateAdapter {
   // biome-ignore lint/suspicious/useAwait: interface requires an async method
   async dequeue(threadId: string): Promise<QueueEntry | null> {
     this.ensureConnected();
+    this.cleanExpiredQueue(threadId, Date.now());
     const queue = this.queues.get(threadId);
     if (!queue || queue.length === 0) {
       return null;
@@ -245,7 +288,57 @@ export class MemoryStateAdapter implements StateAdapter {
   // biome-ignore lint/suspicious/useAwait: interface requires an async method
   async queueDepth(threadId: string): Promise<number> {
     this.ensureConnected();
+    this.cleanExpiredQueue(threadId, Date.now());
     return this.queues.get(threadId)?.length ?? 0;
+  }
+
+  /**
+   * Bounds a map at `maxEntries`. The key being written is exempt so updates
+   * to an existing entry never evict it, and held locks are never evicted by
+   * the queue path because locks live in their own map.
+   */
+  private makeRoom<T>(entries: Map<string, T>, key: string): void {
+    if (entries.has(key) || entries.size < this.maxEntries) {
+      return;
+    }
+    this.sweepExpired();
+    if (entries.size >= this.maxEntries) {
+      const oldest = entries.keys().next();
+      if (!oldest.done) {
+        entries.delete(oldest.value);
+      }
+    }
+  }
+
+  /**
+   * Reclaims expired entries across cache, locks, and queues so memory does
+   * not grow with keys that are never read again. Runs on a timer started by
+   * `connect()` and opportunistically when capacity pressure requires it.
+   */
+  private sweepExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (entry.expiresAt !== null && entry.expiresAt <= now) {
+        this.cache.delete(key);
+      }
+    }
+    this.cleanExpiredLocks();
+    for (const threadId of this.queues.keys()) {
+      this.cleanExpiredQueue(threadId, now);
+    }
+  }
+
+  private cleanExpiredQueue(threadId: string, now: number): void {
+    const queue = this.queues.get(threadId);
+    if (!queue) {
+      return;
+    }
+    const active = queue.filter((entry) => entry.expiresAt > now);
+    if (active.length === 0) {
+      this.queues.delete(threadId);
+    } else if (active.length !== queue.length) {
+      this.queues.set(threadId, active);
+    }
   }
 
   private ensureConnected(): void {
@@ -267,6 +360,8 @@ export class MemoryStateAdapter implements StateAdapter {
 }
 
 /** Create an in-memory `StateAdapter` (development/testing default). */
-export function createMemoryState(): StateAdapter {
-  return new MemoryStateAdapter();
+export function createMemoryState(
+  options: ConstructorParameters<typeof MemoryStateAdapter>[0] = {}
+): StateAdapter {
+  return new MemoryStateAdapter(options);
 }

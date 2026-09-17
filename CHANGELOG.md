@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Raised the Node.js minimum to `>=22.12.0`. `@tanstack/ai-isolate-node` and `isolated-vm` already require Node 22. Upgrade older Node installations before using this release
+
+### Changed
+
+- Upgraded development dependencies to Payload 3.89, Next.js 16.3.5, React 19.3, Vitest 5, Vite 8, and TypeScript 7, with updated build and test tooling. Build approvals now use `pnpm-workspace.yaml`, supporting pnpm `>=10.26.0` without an upper bound
+- Upgraded bundled Zod to `^4.6.5`
+
 ## [0.10.0] - 2026-06-07
 
 ### Breaking Changes
